@@ -184,7 +184,7 @@ Userland validation of the five services added after v0.5.5, from a cold start, 
 **Steps:**
 1. Skip check: `nvidia-smi` must succeed. If it does not, record SKIP for 6.1 and stop.
 2. `./harbor.sh config get chandra.host_port` prints `35080`.
-3. `./harbor.sh up --no-defaults chandra nvidia`; poll `http://localhost:35080/health` until 200 (first run downloads ~20GB of weights, allow up to 30 min).
+3. `./harbor.sh up --no-defaults chandra nvidia`; poll `http://localhost:35080/health` until 200 (first run downloads ~10GB of weights, allow up to 30 min).
 4. `curl -s http://localhost:35080/v1/models | jq -r '.data[].id'`.
 5. OCR a real page: fetch any text-bearing PNG (e.g. `curl -sL -o /tmp/page.png https://raw.githubusercontent.com/datalab-to/chandra/main/static/images/example.png` or use a local scan), then
    `IMG=$(base64 -w0 /tmp/page.png); curl -s http://localhost:35080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"chandra","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,'"$IMG"'"}},{"type":"text","text":"Convert this page to markdown."}]}],"max_tokens":2048}'`.

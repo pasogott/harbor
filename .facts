@@ -1981,7 +1981,7 @@
   command: d=docs/2.3.97-Satellite-Linkwarden.md; grep -q "^##### Archived but never tagged" $d && grep -q "aiTaggingMethod" $d && grep -q "Settings Applied" $d && grep -q "Auto-tagging link" $d && grep -q "check-runtime.sh tags" $d && grep -q "Based on existing Tags" $d && grep -q "Based on predefined Tags" $d && grep -q "RSS Subscriptions" $d && grep -A4 "^##### Volumes" $d | grep "pgdata" | grep -q "postgres" && grep -q "empty database" $d
   tags: [linkwarden, spec, implemented]
 
-## chandra
+# services > chandra
 - label: chandra is a backend service at services/compose.chandra.yml running Chandra 2 OCR on the vllm/vllm-openai image (HARBOR_CHANDRA_IMAGE, default vllm/vllm-openai, HARBOR_CHANDRA_VERSION default v0.17.0) on host port 35080 (container port 8000), with harbor config get chandra.host_port resolving to 35080
   command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; HARBOR_CHANDRA_IMAGE=probe/img HARBOR_CHANDRA_VERSION=probe-ver HARBOR_CHANDRA_HOST_PORT=35080 C chandra | jq -e '.services.chandra | .image=="probe/img:probe-ver" and .container_name==(env.HARBOR_CONTAINER_PREFIX // "harbor")+".chandra" and (.ports|length==1) and .ports[0].target==8000 and .ports[0].published=="35080" and (.networks|has("harbor-network"))' >/dev/null && grep -q "^HARBOR_CHANDRA_HOST_PORT=35080$" profiles/default.env && grep -q "^HARBOR_CHANDRA_IMAGE=\"vllm/vllm-openai\"$" profiles/default.env && grep -q "^HARBOR_CHANDRA_VERSION=\"v0.17.0\"$" profiles/default.env && [ "$(./harbor.sh config get chandra.host_port)" = "35080" ]
   tags: [chandra, implemented]
