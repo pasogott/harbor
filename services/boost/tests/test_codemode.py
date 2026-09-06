@@ -319,6 +319,28 @@ class TestExecution:
     )
     assert "Z" not in zombies.stdout
 
+  @pytest.mark.asyncio
+  async def test_clean_exit_kills_in_group_child(self):
+    """A child left behind by a program that exits normally dies with the group."""
+    import time
+
+    with request_context(), config_overrides(TOOLS=["current_time"]):
+      codemode.hide(codemode.catalog({}))
+
+      started = time.monotonic()
+      done = await codemode.execute_code(
+        "import subprocess\n"
+        "subprocess.Popen(['sleep', '302'])\n"
+        "print('done')\n"
+      )
+      elapsed = time.monotonic() - started
+
+    assert "done" in done
+    assert elapsed < 1.5
+
+    running = subprocess.run(["ps", "-eo", "args="], capture_output=True, text=True)
+    assert "sleep 302" not in [line.strip() for line in running.stdout.splitlines()]
+
 
 class TestRegistryLifecycle:
   @pytest.mark.asyncio

@@ -225,8 +225,9 @@ async def run(
 async def _cleanup(proc, stderr_task, *, force: bool) -> None:
   """Let go of the runner and its pipes, without blocking.
 
-  A program that finished on its own gets a short window to exit by itself;
-  only a timeout, an error or a runner that overstays it gets SIGKILLed.
+  A program that finished on its own gets a short window to exit by itself,
+  then the whole process group is SIGKILLed either way: the runner may have
+  exited leaving children of its own behind, and those must not outlive it.
   """
   if proc.returncode is None and not force:
     with contextlib.suppress(Exception):
@@ -234,13 +235,12 @@ async def _cleanup(proc, stderr_task, *, force: bool) -> None:
     with contextlib.suppress(Exception):
       await asyncio.wait_for(asyncio.shield(proc.wait()), CLEANUP_TIMEOUT)
 
-  if proc.returncode is None:
-    try:
-      os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except OSError:
-      with contextlib.suppress(ProcessLookupError):
-        proc.kill()
+  # start_new_session makes the runner its own group leader, so the pgid is
+  # its pid - which stays usable after the leader itself has been reaped.
+  with contextlib.suppress(ProcessLookupError):
+    os.killpg(proc.pid, signal.SIGKILL)
 
+  if proc.returncode is None:
     with contextlib.suppress(Exception):
       await asyncio.wait_for(asyncio.shield(proc.wait()), CLEANUP_TIMEOUT)
 
