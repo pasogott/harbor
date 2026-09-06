@@ -26,6 +26,12 @@ RUNNER_PATH = Path(__file__).with_name("codemode_runner.py")
 
 STDERR_CAP = 4096
 CLEANUP_TIMEOUT = 1.0
+DEFAULT_MAX_OUTPUT = 8000
+
+
+def effective_max_output(max_output: int) -> int:
+  """A non-positive cap means "use the default", never "unlimited"."""
+  return max_output if max_output > 0 else DEFAULT_MAX_OUTPUT
 
 
 def truncate(text: str, max_chars: int) -> str:
@@ -168,6 +174,7 @@ async def run(
 ) -> dict:
   """Run `code` in the sandbox, returning `{stdout, result, error}`."""
   captured = {"stdout": ""}
+  max_output = effective_max_output(max_output)
 
   try:
     proc = await asyncio.create_subprocess_exec(
@@ -185,6 +192,7 @@ async def run(
     return {"stdout": "", "result": None, "error": f"failed to start sandbox: {exc}"}
 
   stderr_task = asyncio.ensure_future(_drain(proc.stderr, STDERR_CAP))
+  failed = True
 
   try:
     outcome = await asyncio.wait_for(
@@ -193,6 +201,7 @@ async def run(
       ),
       timeout=timeout,
     )
+    failed = False
   except asyncio.TimeoutError:
     logger.warning(f"codemode: program exceeded {timeout}s, killing sandbox")
     outcome = {
@@ -207,14 +216,24 @@ async def run(
       "error": f"sandbox failure: {type(exc).__name__}: {exc}",
     }
   finally:
-    await _cleanup(proc, stderr_task)
+    await _cleanup(proc, stderr_task, force=failed)
 
   outcome["stdout"] = truncate(outcome.get("stdout") or "", max_output)
   return outcome
 
 
-async def _cleanup(proc, stderr_task) -> None:
-  """Kill the whole process group and let go of the pipes, without blocking."""
+async def _cleanup(proc, stderr_task, *, force: bool) -> None:
+  """Let go of the runner and its pipes, without blocking.
+
+  A program that finished on its own gets a short window to exit by itself;
+  only a timeout, an error or a runner that overstays it gets SIGKILLed.
+  """
+  if proc.returncode is None and not force:
+    with contextlib.suppress(Exception):
+      proc.stdin.close()
+    with contextlib.suppress(Exception):
+      await asyncio.wait_for(asyncio.shield(proc.wait()), CLEANUP_TIMEOUT)
+
   if proc.returncode is None:
     try:
       os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
@@ -225,11 +244,15 @@ async def _cleanup(proc, stderr_task) -> None:
     with contextlib.suppress(Exception):
       await asyncio.wait_for(asyncio.shield(proc.wait()), CLEANUP_TIMEOUT)
 
-  stderr_task.cancel()
-  with contextlib.suppress(Exception):
-    await stderr_task
-
+  # Closing first gives the drain EOF even when a grandchild outside the
+  # process group still holds the write end of the pipe.
   transport = getattr(proc, "_transport", None)
   if transport is not None:
     with contextlib.suppress(Exception):
       transport.close()
+
+  stderr_task.cancel()
+  # CancelledError is a BaseException: suppressing only Exception here would
+  # cancel the caller's request instead of returning the outcome.
+  with contextlib.suppress(BaseException):
+    await stderr_task

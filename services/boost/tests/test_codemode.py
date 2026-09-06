@@ -283,11 +283,28 @@ class TestExecution:
       )
       spawn_elapsed = time.monotonic() - started
 
+      # Escapes the process group, so it keeps the runner's pipes open past
+      # the kill - the caller must still get the timeout string back.
+      started = time.monotonic()
+      escaped = await codemode.execute_code(
+        "import subprocess\n"
+        "subprocess.Popen(['sleep', '31338'], start_new_session=True)\n"
+        "while True:\n"
+        "  pass\n"
+      )
+      escape_elapsed = time.monotonic() - started
+
     assert "error: timeout after 2s" in flooded
     assert "before the flood" in flooded  # partial stdout survives the kill
     assert "error: timeout after 2s" in spawned
+    assert "error: timeout after 2s" in escaped
     assert flood_elapsed < 4
     assert spawn_elapsed < 4
+    assert escape_elapsed < 4
+
+    # The escaped grandchild is out of the group by construction, so it is the
+    # test's job to reap it.
+    subprocess.run(["pkill", "-f", "sleep 31338"])
 
     # Exact argv match: this session's own command line mentions the repro.
     running = subprocess.run(["ps", "-eo", "args="], capture_output=True, text=True)

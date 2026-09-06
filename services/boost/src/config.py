@@ -635,7 +635,7 @@ CODEMODE_MAX_OUTPUT = Config[int](
     default="8000",
     description=(
         "Maximum number of characters of program output returned to the model by the "
-        "`codemode` module."
+        "`codemode` module. Zero or a negative value falls back to the default."
     ),
 )
 

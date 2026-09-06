@@ -112,7 +112,10 @@ def format_outcome(outcome: dict) -> str:
     rendered = result if isinstance(result, str) else repr(result)
     parts.append(
       "result: " +
-      codemode_sandbox.truncate(rendered, config.CODEMODE_MAX_OUTPUT.value)
+      codemode_sandbox.truncate(
+        rendered,
+        codemode_sandbox.effective_max_output(config.CODEMODE_MAX_OUTPUT.value),
+      )
     )
 
   error = outcome.get("error")
