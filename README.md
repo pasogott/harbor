@@ -30,6 +30,7 @@ Harbor is a CLI and companion app that lets you spin up a complete local LLM sta
 
 ## News
 
+- **v0.5.7** - New Chandra 2 OCR backend serving Datalab's document OCR model over an OpenAI-compatible API
 - **v0.5.6** - Six new services — Text Embeddings Inference, LightRAG, Paperless-ngx, Paperless-GPT, Whishper, and Linkwarden — with Ollama, llama.cpp, Open WebUI, LibreChat, AnythingLLM, and Traefik integrations
 - **v0.5.5** - Workspace files now stay owned by your host user across 20+ services, new Speech-to-Speech (s2s) backend, Dify 1.x and DeerFlow v2 upgrades, and a large repair sweep restoring dozens of services on current upstream images
 - **v0.5.4** - Repairs first-boot and integration failures across 20+ services found by the new runnable integration suite, plus Boost error responses that propagate real backend status codes
@@ -268,7 +269,7 @@ harbor eject searxng llamacpp > docker-compose.harbor.yml
 [Parllama](https://github.com/av/harbor/wiki/2.1.7-Frontend:-parllama) ⦁︎ [SillyTavern](https://github.com/av/harbor/wiki/2.1.15-Frontend-SillyTavern) ⦁︎ [Voicebox](https://github.com/av/harbor/wiki/2.1.16-Frontend-Voicebox)
 
 ##### Backends
-[AirLLM](https://github.com/av/harbor/wiki/2.2.11-Backend:-AirLLM) ⦁︎ [Aphrodite](https://github.com/av/harbor/wiki/2.2.5-Backend:-Aphrodite-Engine) ⦁︎ [faster-whisper-server](https://github.com/av/harbor/wiki/2.2.14-Backend:-Speaches) ⦁︎ [ik_llama.cpp](https://github.com/av/harbor/wiki/2.2.21-Backend-ik_llama.cpp)
+[AirLLM](https://github.com/av/harbor/wiki/2.2.11-Backend:-AirLLM) ⦁︎ [Aphrodite](https://github.com/av/harbor/wiki/2.2.5-Backend:-Aphrodite-Engine) ⦁︎ [Chandra](https://github.com/av/harbor/wiki/2.2.27-Backend-Chandra) ⦁︎ [faster-whisper-server](https://github.com/av/harbor/wiki/2.2.14-Backend:-Speaches) ⦁︎ [ik_llama.cpp](https://github.com/av/harbor/wiki/2.2.21-Backend-ik_llama.cpp)
 [KoboldCpp](https://github.com/av/harbor/wiki/2.2.16-Backend:-KoboldCpp) ⦁︎ [KTransformers](https://github.com/av/harbor/wiki/2.2.13-Backend:-KTransformers) ⦁︎ [Lemonade](https://github.com/av/harbor/wiki/2.2.19-Backend-Lemonade) ⦁︎ [llama.cpp](https://github.com/av/harbor/wiki/2.2.2-Backend:-llama.cpp)
 [lmdeploy](https://github.com/av/harbor/wiki/2.2.10-Backend:-lmdeploy) ⦁︎ [mistral.rs](https://github.com/av/harbor/wiki/2.2.6-Backend:-mistral.rs) ⦁︎ [Modular MAX](https://github.com/av/harbor/wiki/2.2.17-Backend-Modular-MAX) ⦁︎ [Needle](https://github.com/av/harbor/wiki/2.2.20-Backend-Needle)
 [Nexa SDK](https://github.com/av/harbor/wiki/2.2.15-Backend:-Nexa-SDK) ⦁︎ [Ollama](https://github.com/av/harbor/wiki/2.2.1-Backend:-Ollama) ⦁︎ [openedai-speech](https://github.com/av/harbor/wiki/2.2.7-Backend:-openedai-speech) ⦁︎ [Parler](https://github.com/av/harbor/wiki/2.2.8-Backend:-Parler)

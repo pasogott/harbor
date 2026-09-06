@@ -1984,31 +1984,31 @@
 ## chandra
 - label: chandra is a backend service at services/compose.chandra.yml running Chandra 2 OCR on the vllm/vllm-openai image (HARBOR_CHANDRA_IMAGE, default vllm/vllm-openai, HARBOR_CHANDRA_VERSION default v0.17.0) on host port 35080 (container port 8000), with harbor config get chandra.host_port resolving to 35080
   command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; HARBOR_CHANDRA_IMAGE=probe/img HARBOR_CHANDRA_VERSION=probe-ver HARBOR_CHANDRA_HOST_PORT=35080 C chandra | jq -e '.services.chandra | .image=="probe/img:probe-ver" and .container_name==(env.HARBOR_CONTAINER_PREFIX // "harbor")+".chandra" and (.ports|length==1) and .ports[0].target==8000 and .ports[0].published=="35080" and (.networks|has("harbor-network"))' >/dev/null && grep -q "^HARBOR_CHANDRA_HOST_PORT=35080$" profiles/default.env && grep -q "^HARBOR_CHANDRA_IMAGE=\"vllm/vllm-openai\"$" profiles/default.env && grep -q "^HARBOR_CHANDRA_VERSION=\"v0.17.0\"$" profiles/default.env && [ "$(./harbor.sh config get chandra.host_port)" = "35080" ]
-  tags: [chandra, spec]
+  tags: [chandra, implemented]
 - label: chandra serves the model from HARBOR_CHANDRA_MODEL (default datalab-to/chandra-ocr-2) under the OpenAI model name chandra (--served-model-name chandra), and passes HARBOR_CHANDRA_EXTRA_ARGS (default empty) verbatim to vllm
   command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; HARBOR_CHANDRA_MODEL=probe-model HARBOR_CHANDRA_EXTRA_ARGS="--probe-flag probe-val" C chandra | jq -e '.services.chandra.command | (index("--model") as $i | $i!=null and .[$i+1]=="probe-model") and (index("--served-model-name") as $i | $i!=null and .[$i+1]=="chandra") and (index("--probe-flag") as $i | $i!=null and .[$i+1]=="probe-val")' >/dev/null && C chandra | jq -e '.services.chandra.command | index("datalab-to/chandra-ocr-2")!=null' >/dev/null && grep -q "^HARBOR_CHANDRA_MODEL=\"datalab-to/chandra-ocr-2\"$" profiles/default.env && grep -q "^HARBOR_CHANDRA_EXTRA_ARGS=\"\"$" profiles/default.env
-  tags: [chandra, spec]
+  tags: [chandra, implemented]
 - label: chandra mounts the host HuggingFace cache (HARBOR_HF_CACHE, falling back to ./services/chandra/.hf-cache) at /root/.cache/huggingface and passes HARBOR_HF_TOKEN as HUGGING_FACE_HUB_TOKEN, so the OCR weights are downloaded once into the standard cache layout
   command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; HARBOR_HF_CACHE=/probe-cache HARBOR_HF_TOKEN=probe-tok C chandra | jq -e '.services.chandra | ([.volumes[]|select(.type=="bind" and .source=="/probe-cache" and .target=="/root/.cache/huggingface")]|length==1) and .environment.HUGGING_FACE_HUB_TOKEN=="probe-tok"' >/dev/null && grep -q "HARBOR_HF_CACHE:-./services/chandra/.hf-cache}:/root/.cache/huggingface" services/compose.chandra.yml
-  tags: [chandra, spec]
+  tags: [chandra, implemented]
 - label: chandra healthcheck probes GET /health on container port 8000 with a long start_period (>= 30m) so a first-run model download does not flip the container to unhealthy
   command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; C chandra | jq -e '.services.chandra.healthcheck | (.test|join(" ")|test("/health")) and (.test|join(" ")|test("8000")) and ((.start_period|sub("m.*";"")|tonumber) >= 30) and .retries>=10' >/dev/null
-  tags: [chandra, spec]
+  tags: [chandra, implemented]
 - label: chandra is GPU-only: compose.x.chandra.nvidia.yml reserves all nvidia GPUs for the chandra service (harbor up chandra nvidia), and the base compose file itself declares no device reservation
   command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; C chandra nvidia | jq -e '.services.chandra.deploy.resources.reservations.devices | length==1 and .[0].driver=="nvidia" and .[0].count==-1 and (.[0].capabilities|index("gpu")!=null)' >/dev/null && C chandra | jq -e '.services.chandra.deploy.resources.reservations.devices == null' >/dev/null
-  tags: [chandra, spec]
+  tags: [chandra, implemented]
 - label: chandra has a service directory services/chandra with override.env (loaded by the compose file after ./.env) and a .gitignore excluding the local .hf-cache fallback
   command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; test -f services/chandra/override.env && grep -q "^\.hf-cache" services/chandra/.gitignore && grep -Eq "^\s*- \./services/chandra/override\.env" services/compose.chandra.yml && grep -Eq "^\s*- \./\.env" services/compose.chandra.yml
-  tags: [chandra, spec]
+  tags: [chandra, implemented]
 - label: chandra is documented at docs/2.2.27-Backend-Chandra.md and registered in serviceMetadata.ts as a backend with the HST.backend tag, the datalab-to/chandra projectUrl and the 2.2.27-Backend-Chandra wikiUrl
   command: test -f docs/2.2.27-Backend-Chandra.md && grep -A7 "^    chandra: {" app/src/serviceMetadata.ts | grep -q "HST.backend" && grep -A7 "^    chandra: {" app/src/serviceMetadata.ts | grep -q "2.2.27-Backend-Chandra\`" && grep -A7 "^    chandra: {" app/src/serviceMetadata.ts | grep -q "projectUrl: .https://github.com/datalab-to/chandra" && grep -A7 "^    chandra: {" app/src/serviceMetadata.ts | grep -q "wikiUrl:"
-  tags: [chandra, spec]
+  tags: [chandra, implemented]
 - label: chandra doc follows the Windmill format (Key Features, #### Starting, #### Configuration, ##### Environment Variables, #### Integration with Harbor, #### Troubleshooting, #### Links), states that the service needs an NVIDIA GPU (harbor up chandra nvidia), that ROCm is untested, that the model weights are under the OpenRAIL-M license, and lists HARBOR_CHANDRA_HOST_PORT 35080, HARBOR_CHANDRA_MODEL and HARBOR_CHANDRA_EXTRA_ARGS in the env table
   command: d=docs/2.2.27-Backend-Chandra.md; prev=0; for h in "#### Starting" "#### Configuration" "##### Environment Variables" "#### Integration with Harbor" "#### Troubleshooting" "#### Links"; do n=$(grep -n -m1 "^$h$" $d | cut -d: -f1); [ -n "$n" ] && [ "$n" -gt "$prev" ] || { echo "missing or misordered: $h"; exit 1; }; prev=$n; done; [ "$(grep -A6 "^\*\*Key Features" $d | grep -c "^- ")" -ge 3 ] && grep -q "Handle: \`chandra\`" $d && grep -q "localhost:35080" $d && grep -q "harbor up chandra nvidia" $d && grep -qi "nvidia" $d && grep -qi "rocm" $d && grep -qi "untested" $d && grep -qi "OpenRAIL-M" $d && grep -q "HARBOR_CHANDRA_HOST_PORT" $d && grep -q "35080" $d && grep -q "HARBOR_CHANDRA_MODEL" $d && grep -q "HARBOR_CHANDRA_EXTRA_ARGS" $d && grep -q "datalab-to/chandra-ocr-2" $d
-  tags: [chandra, spec]
+  tags: [chandra, implemented]
 - label: README lists Chandra in the Backends line (linking the 2.2.27-Backend-Chandra wiki page) and the News section has a bullet mentioning Chandra
   command: sed -n "/^##### Backends/,/^#####/p" README.md | grep -q "\[Chandra\](https://github.com/av/harbor/wiki/2.2.27-Backend-Chandra)" && sed -n "/^## News/,/^## Documentation/p" README.md | grep "^- " | grep -q "Chandra"
-  tags: [chandra, spec]
+  tags: [chandra, implemented]
 - label: tests/new-services.md has a chandra group with a cold-start test (harbor up --no-defaults chandra nvidia, poll localhost:35080/health, /v1/models lists chandra, an OCR chat completion with an image, harbor down chandra) that is explicitly skipped on hosts without an NVIDIA GPU
   command: grep -q "^## Group [0-9]* — chandra" tests/new-services.md && sed -n "/^## Group [0-9]* — chandra/,/^## Group/p" tests/new-services.md | grep -q "harbor.sh up --no-defaults chandra nvidia" && sed -n "/^## Group [0-9]* — chandra/,/^## Group/p" tests/new-services.md | grep -q "localhost:35080/health" && sed -n "/^## Group [0-9]* — chandra/,/^## Group/p" tests/new-services.md | grep -q "/v1/models" && sed -n "/^## Group [0-9]* — chandra/,/^## Group/p" tests/new-services.md | grep -q "/v1/chat/completions" && sed -n "/^## Group [0-9]* — chandra/,/^## Group/p" tests/new-services.md | grep -qi "skip" && sed -n "/^## Group [0-9]* — chandra/,/^## Group/p" tests/new-services.md | grep -q "harbor.sh down chandra" && grep -q "chandra" <(head -1 tests/new-services.md)
-  tags: [chandra, spec]
+  tags: [chandra, implemented]

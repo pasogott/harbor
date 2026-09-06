@@ -1192,4 +1192,12 @@ export const serviceMetadata: Record<string, Partial<HarborService>> = {
         wikiUrl: `${wikiUrl}/2.3.95-Satellite-Paperless-GPT`,
         tooltip: 'LLM companion for Paperless-ngx: suggests titles, tags and correspondents, and does LLM-based OCR.',
     },
+    chandra: {
+        name: 'Chandra 2',
+        tags: [HST.backend, HST.api, HST.image],
+        projectUrl: 'https://github.com/datalab-to/chandra',
+        logo: 'https://www.google.com/s2/favicons?domain=www.datalab.to&sz=128',
+        wikiUrl: `${wikiUrl}/2.2.27-Backend-Chandra`,
+        tooltip: 'Chandra 2 OCR served with vLLM: document and image to structured markdown, HTML or JSON.',
+    },
 };
