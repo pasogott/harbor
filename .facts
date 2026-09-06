@@ -444,7 +444,7 @@
 ## cognee
 - label: cognee and cognee-mcp depend on ollama-init with condition service_healthy (ollama-init is a long-running healthy sidecar, never 'completed')
   command: grep -A2 'ollama-init' services/compose.x.cognee.ollama.yml | grep -q 'service_healthy' && ! grep -q 'service_completed_successfully' services/compose.x.cognee.ollama.yml
-  tags: [services-it, cognee, implemented]
+  tags: [services-it, cognee, implemented, ollama-init]
 
 ## karakeep
 - label: karakeep pins Meilisearch v1.41.0 and sets MEILI_EXPERIMENTAL_DUMPLESS_UPGRADE=true so existing indexes upgrade in place on version bumps
@@ -694,6 +694,24 @@
 - label: compose.ollama.yml additionally binds HARBOR_HF_CACHE read-only at ${HOME}/.cache/huggingface so llama.cpp-cache GGUF symlinks targeting absolute host HF-cache blob paths resolve inside the container
   command: grep -q ':${HOME}/.cache/huggingface:ro' services/compose.ollama.yml
   tags: [spec, cache-symlinks, implemented]
+- label: the ollama-init sidecar in compose.ollama.yml runs on the slim alpine:3.20 image instead of the full ${HARBOR_OLLAMA_IMAGE}:${HARBOR_OLLAMA_VERSION} (baseline on this host: ollama/ollama:latest = 9.89GB, :rocm = 4.52GB); it mounts only services/ollama/init_entrypoint.sh (no /root/.ollama volume, since pulls go through the ollama server's HTTP API and land in its cache), keeps entrypoint /init_entrypoint.sh and still depends on ollama being service_healthy
+  command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; C ollama | jq -e '.services["ollama-init"] | .image=="alpine:3.20" and ([.volumes[]|select(.target=="/root/.ollama")]|length==0) and ([.volumes[]|select(.target=="/init_entrypoint.sh" and (.source|endswith("/services/ollama/init_entrypoint.sh")))]|length==1) and .entrypoint==["/init_entrypoint.sh"] and .depends_on.ollama.condition=="service_healthy"' >/dev/null && grep -q '^HARBOR_OLLAMA_DEFAULT_MODELS="nomic-embed-text:latest"$' profiles/default.env
+  tags: [spec, ollama-init]
+- label: compose.x.ollama.rocm.yml no longer carries an ollama-init block: under 'harbor up ollama' with the rocm capability the ollama service still gets /dev/kfd + /dev/dri and ${HARBOR_OLLAMA_IMAGE}:rocm while ollama-init stays on plain alpine:3.20 with no devices (the sidecar never runs inference, so it needs no GPU)
+  command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; C ollama rocm | jq -e '(.services.ollama | (.image|endswith(":rocm")) and ([.devices[].source]|index("/dev/kfd")!=null and index("/dev/dri")!=null)) and (.services["ollama-init"] | .image=="alpine:3.20" and (.devices==null or (.devices|length==0)) and (.deploy.resources.reservations.devices==null))' >/dev/null && ! grep -q 'ollama-init' services/compose.x.ollama.rocm.yml
+  tags: [spec, ollama-init]
+- label: services/ollama/init_entrypoint.sh is POSIX sh (#!/bin/sh, clean under shellcheck -s sh, no bash arrays/pipefail/[[ ]]) and pulls each comma-separated HARBOR_OLLAMA_DEFAULT_MODELS entry by POSTing {"model":..,"stream":false} to ${OLLAMA_HOST:-http://ollama:11434}/api/pull with busybox wget (no ollama CLI, no apk add), then creates /run/harbor/ollama-init-done and stays running with tail -f /dev/null
+  command: s=services/ollama/init_entrypoint.sh; head -1 $s | grep -qx '#!/bin/sh' && shellcheck -s sh $s && ! grep -Eq 'read -ra|pipefail|\[\[|ollama pull|apk add|local ' $s && grep -q 'wget' $s && grep -q '/api/pull' $s && grep -q '"stream":false' $s && grep -q 'touch /run/harbor/ollama-init-done' $s && grep -q 'exec tail -f /dev/null' $s
+  tags: [spec, ollama-init]
+- label: a model that fails to pull makes init_entrypoint.sh print a WARNING naming it and continue with the remaining models; the done marker is still created so the sidecar turns healthy and dependents (cognee, surfsense) are not blocked by one bad model id. Checked black-box in a throwaway alpine:3.20 container with a stub wget that always fails
+  command: d=$(mktemp -d); printf '#!/bin/sh\necho stub wget failure >&2; exit 1\n' >$d/wget; chmod +x $d/wget; docker run --rm -e PATH=/stub:/usr/local/bin:/usr/bin:/bin -e HARBOR_OLLAMA_DEFAULT_MODELS='probe-bad:latest, probe-second:latest' -v $d:/stub:ro -v $PWD/services/ollama/init_entrypoint.sh:/init_entrypoint.sh:ro alpine:3.20 sh -c '/init_entrypoint.sh >/tmp/out 2>&1 & sleep 3; cat /tmp/out; grep -q WARNING /tmp/out && grep -q probe-bad /tmp/out && grep -q probe-second /tmp/out && test -f /run/harbor/ollama-init-done'; r=$?; rm -rf $d; exit $r
+  tags: [spec, ollama-init]
+- label: the sidecar's healthcheck contract is unchanged: it flips to healthy when /run/harbor/ollama-init-done exists (2s interval, 900 retries so multi-GB first pulls fit), and every consumer keeps depends_on ollama-init condition service_healthy — compose.x.cognee.ollama.yml for cognee and cognee-mcp
+  command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; C ollama cognee | jq -e '(.services["ollama-init"].healthcheck | .test==["CMD-SHELL","test -f /run/harbor/ollama-init-done"] and .interval=="2s" and .retries==900) and .services.cognee.depends_on["ollama-init"].condition=="service_healthy" and .services["cognee-mcp"].depends_on["ollama-init"].condition=="service_healthy"' >/dev/null
+  tags: [spec, ollama-init, cognee]
+- label: [runtime: ollama up] after ./harbor.sh up --no-defaults ollama the harbor.ollama-init container reports healthy and Ollama on host port 33821 (HARBOR_OLLAMA_HOST_PORT) lists the default model nomic-embed-text:latest in /api/tags, pulled by the slim sidecar over HTTP
+  command: docker inspect -f '{{.Config.Image}} {{.State.Status}} {{.State.Health.Status}}' harbor.ollama-init | grep -q '^alpine:3.20 running healthy$' && curl -sf localhost:33821/api/tags | jq -e '[.models[].name]|index("nomic-embed-text:latest")!=null' >/dev/null
+  tags: [spec, ollama-init, runtime]
 
 ## ktransformers
 - label: compose.ktransformers.yml additionally binds HARBOR_HF_CACHE read-only at ${HOME}/.cache/huggingface so llama.cpp-cache GGUF symlinks targeting absolute host HF-cache blob paths resolve inside the container
@@ -1980,4 +1998,3 @@
 - label: the linkwarden doc has an "Archived but never tagged" troubleshooting entry (verify aiTaggingMethod persisted via the Settings Applied toast or psql, look for Auto-tagging link log lines, run check-runtime.sh tags), uses the UI labels Auto-generate Tags / Based on existing Tags / Based on predefined Tags, mentions RSS Subscriptions, notes pgdata is postgres-owned under Volumes, and states the healthcheck passes on an empty database
   command: d=docs/2.3.97-Satellite-Linkwarden.md; grep -q "^##### Archived but never tagged" $d && grep -q "aiTaggingMethod" $d && grep -q "Settings Applied" $d && grep -q "Auto-tagging link" $d && grep -q "check-runtime.sh tags" $d && grep -q "Based on existing Tags" $d && grep -q "Based on predefined Tags" $d && grep -q "RSS Subscriptions" $d && grep -A4 "^##### Volumes" $d | grep "pgdata" | grep -q "postgres" && grep -q "empty database" $d
   tags: [linkwarden, spec, implemented]
-
