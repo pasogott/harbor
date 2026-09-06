@@ -38,7 +38,6 @@ services:
       - ./.env
       - ./services/ollama/override.env
     environment:
-      HARBOR_OLLAMA_DEFAULT_MODELS: ${HARBOR_OLLAMA_DEFAULT_MODELS}
       OLLAMA_HOST: ${HARBOR_OLLAMA_INTERNAL_URL:-http://ollama:11434}
     volumes:
       - ./services/ollama/init_entrypoint.sh:/init_entrypoint.sh

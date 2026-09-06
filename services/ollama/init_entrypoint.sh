@@ -41,17 +41,28 @@ pull_default_models() {
       continue
     fi
 
+    case "$model" in
+      *\"*|*\\*)
+        warn_pull_failure "$model" "Model names containing quotes or backslashes are not supported."
+        continue
+        ;;
+    esac
+
     echo "Pulling model $model"
-    payload=$(printf '{"model":"%s","stream":false}' "$model")
-    if response=$(wget -qO- \
-        --header 'Content-Type: application/json' \
-        --post-data "$payload" \
-        "$host/api/pull" 2>&1); then
-      if ! printf '%s' "$response" | grep -q '"status":"success"'; then
-        warn_pull_failure "$model" "$response"
-      fi
+    payload=$(printf '{"model":"%s","stream":true}' "$model")
+    response_file=/tmp/ollama-pull-response.$$
+    : > "$response_file"
+    wget -qO- \
+      --header 'Content-Type: application/json' \
+      --post-data "$payload" \
+      "$host/api/pull" 2>&1 | tee "$response_file"
+    last_line=$(tail -n 1 "$response_file")
+    rm -f "$response_file"
+
+    if printf '%s\n' "$last_line" | grep -q '"status":"success"'; then
+      echo "Pulled model $model"
     else
-      warn_pull_failure "$model" "$response"
+      warn_pull_failure "$model" "$last_line"
     fi
   done
 }
