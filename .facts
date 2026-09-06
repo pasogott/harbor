@@ -1410,6 +1410,47 @@
   command: cd services/boost && uv run pytest -q tests/test_backend_error_logging.py
   tags: [spec, implemented, boost-error-logging]
 
+## codemode
+- label: codemode advertises exactly one local tool __tool_execute_code with a single code parameter and hides every other registered local tool from collect_tool_defs
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k advertises_single_tool
+  tags: [spec, codemode, codemode-boost]
+- label: codemode registers HARBOR_BOOST_TOOLS via the tools module selection and absorbs local tools registered by earlier workflow steps into the hidden catalog
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k catalog_absorbs
+  tags: [spec, codemode, codemode-boost]
+- label: codemode system prompt renders each hidden tool as a Python signature name(arg: type = default) -> str with its docstring summary and instructs the model to print or assign result
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k prompt_renders_signatures
+  tags: [spec, codemode, codemode-boost]
+- label: codemode execute_code runs the program in an isolated subprocess and round-trips a hidden tool call such as print(current_time()) through the JSON-lines protocol returning the printed output
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k roundtrip
+  tags: [spec, codemode, codemode-boost]
+- label: codemode kills a program that exceeds HARBOR_BOOST_CODEMODE_TIMEOUT and returns a timeout message instead of raising
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k timeout_kills
+  tags: [spec, codemode, codemode-boost]
+- label: codemode returns program exceptions as traceback text and hidden tool errors as RuntimeError inside the program without breaking the tool loop
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k program_error
+  tags: [spec, codemode, codemode-boost]
+- label: codemode restores the full local tool registry when apply exits on success error or timeout so later modules see the original tools
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k restores_registry
+  tags: [spec, codemode, codemode-boost]
+- label: codemode caps captured output at HARBOR_BOOST_CODEMODE_MAX_OUTPUT chars and rejects hidden tool calls beyond HARBOR_BOOST_CODEMODE_MAX_CALLS with an error reply
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k output_and_call_caps
+  tags: [spec, codemode, codemode-boost]
+- label: codemode leaves client-supplied request tools untouched and does not advertise them inside the sandbox
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k client_tools_untouched
+  tags: [spec, codemode, codemode-boost]
+- label: harbor launch accepts --codemode in both launch parsers as sugar for --workflow codemode and rejects it together with --workflow
+  command: grep -q -- '--codemode' harbor.sh && grep -q 'does not support --codemode and --workflow together' harbor.sh
+  tags: [spec, codemode, codemode-harbor]
+- label: launch smoke suite covers --codemode routing to a codemode-prefixed model with boost and searxng started
+  command: grep -q -- '--codemode' tests/suites/05-launch-smoke.sh && bash tests/suites/05-launch-smoke.sh
+  tags: [spec, codemode, codemode-harbor]
+- label: codemode module is documented in the Boost modules doc and its env vars in the configuration doc and CLI reference mentions --codemode
+  command: grep -q '^## codemode' docs/5.2.3-Harbor-Boost-Modules.md && grep -q '^## HARBOR_BOOST_CODEMODE_TIMEOUT' docs/5.2.2-Harbor-Boost-Configuration.md && grep -q -- '--codemode' docs/3.-Harbor-CLI-Reference.md
+  tags: [spec, codemode, codemode-harbor]
+- label: HARBOR_BOOST_CODEMODE_TIMEOUT MAX_OUTPUT and MAX_CALLS have defaults in profiles/default.env and are passed through compose.boost.yml
+  command: grep -q '^HARBOR_BOOST_CODEMODE_TIMEOUT=30' profiles/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_OUTPUT=8000' profiles/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_CALLS=50' profiles/default.env && grep -q 'HARBOR_BOOST_CODEMODE_TIMEOUT' services/compose.boost.yml
+  tags: [spec, codemode, codemode-harbor]
+
 # testing
 - label: tests use a Deno orchestrator running sequential bash suites across containerized distros
   command: test -f tests/run.ts && test -f tests/suites/01-install.sh && test -f tests/suites/05-launch-smoke.sh
@@ -1980,4 +2021,3 @@
 - label: the linkwarden doc has an "Archived but never tagged" troubleshooting entry (verify aiTaggingMethod persisted via the Settings Applied toast or psql, look for Auto-tagging link log lines, run check-runtime.sh tags), uses the UI labels Auto-generate Tags / Based on existing Tags / Based on predefined Tags, mentions RSS Subscriptions, notes pgdata is postgres-owned under Volumes, and states the healthcheck passes on an empty database
   command: d=docs/2.3.97-Satellite-Linkwarden.md; grep -q "^##### Archived but never tagged" $d && grep -q "aiTaggingMethod" $d && grep -q "Settings Applied" $d && grep -q "Auto-tagging link" $d && grep -q "check-runtime.sh tags" $d && grep -q "Based on existing Tags" $d && grep -q "Based on predefined Tags" $d && grep -q "RSS Subscriptions" $d && grep -A4 "^##### Volumes" $d | grep "pgdata" | grep -q "postgres" && grep -q "empty database" $d
   tags: [linkwarden, spec, implemented]
-
