@@ -1423,17 +1423,17 @@
 - label: codemode execute_code runs the program in an isolated subprocess and round-trips a hidden tool call such as print(current_time()) through the JSON-lines protocol returning the printed output
   command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k roundtrip
   tags: [codemode, codemode-boost, implemented]
-- label: codemode kills a program that exceeds HARBOR_BOOST_CODEMODE_TIMEOUT and returns a timeout message instead of raising
-  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k timeout_kills
+- label: codemode kills a program that exceeds HARBOR_BOOST_CODEMODE_TIMEOUT together with its whole process group and returns a timeout message with any partial output instead of raising
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k "timeout_kills or timeout_grandchild_and_stderr"
   tags: [codemode, codemode-boost, implemented]
 - label: codemode returns program exceptions as traceback text and hidden tool errors as RuntimeError inside the program without breaking the tool loop
   command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k program_error
   tags: [codemode, codemode-boost, implemented]
-- label: codemode restores the full local tool registry when apply exits on success error or timeout so later modules see the original tools
-  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k restores_registry
+- label: codemode restores the full local tool registry when apply exits on success error or timeout so later modules see the original tools and keeps execute_code advertised when the final completion is deferred
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k "restores_registry or defer_final_keeps_execute_code"
   tags: [codemode, codemode-boost, implemented]
-- label: codemode caps captured output at HARBOR_BOOST_CODEMODE_MAX_OUTPUT chars and rejects hidden tool calls beyond HARBOR_BOOST_CODEMODE_MAX_CALLS with an error reply
-  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k output_and_call_caps
+- label: codemode caps captured output at HARBOR_BOOST_CODEMODE_MAX_OUTPUT chars inside the runner even for multi-megabyte output and rejects hidden tool calls beyond HARBOR_BOOST_CODEMODE_MAX_CALLS with an error reply
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k "output_and_call_caps or output_cap_large_line"
   tags: [codemode, codemode-boost, implemented]
 - label: codemode leaves client-supplied request tools untouched and does not advertise them inside the sandbox
   command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k client_tools_untouched

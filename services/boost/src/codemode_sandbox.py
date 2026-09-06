@@ -9,8 +9,11 @@ filesystem and network.
 """
 
 import asyncio
+import contextlib
 import inspect
 import json
+import os
+import signal
 import sys
 from pathlib import Path
 
@@ -20,6 +23,9 @@ from tools.registry import LOCAL_TOOL_PREFIX
 logger = log.setup_logger("codemode")
 
 RUNNER_PATH = Path(__file__).with_name("codemode_runner.py")
+
+STDERR_CAP = 4096
+CLEANUP_TIMEOUT = 1.0
 
 
 def truncate(text: str, max_chars: int) -> str:
@@ -54,7 +60,30 @@ async def _invoke(fn, args: dict):
   return result
 
 
-async def _exchange(proc, code, hidden_tools, max_calls, captured):
+async def _drain(stream, cap: int) -> bytes:
+  """Keep the child's stderr pipe empty, remembering only the first `cap` bytes."""
+  kept = bytearray()
+  while True:
+    chunk = await stream.read(8192)
+    if not chunk:
+      break
+    if len(kept) < cap:
+      kept.extend(chunk[:cap - len(kept)])
+  return bytes(kept)
+
+
+async def _stderr_text(task) -> str:
+  """Whatever the drain task collected, best effort."""
+  try:
+    collected = await asyncio.wait_for(asyncio.shield(task), CLEANUP_TIMEOUT)
+  except Exception:  # noqa: BLE001 - stderr is a diagnostic, never a failure
+    return ""
+  return collected.decode("utf-8", errors="replace").strip()
+
+
+async def _exchange(
+  proc, code, hidden_tools, max_calls, max_output, captured, stderr_task
+):
   names = [key[len(LOCAL_TOOL_PREFIX):] for key in hidden_tools]
   params = {
     key[len(LOCAL_TOOL_PREFIX):]: tool_params(fn)
@@ -68,6 +97,7 @@ async def _exchange(proc, code, hidden_tools, max_calls, captured):
           "code": code,
           "tools": names,
           "params": params,
+          "max_output": max_output,
         },
         ensure_ascii=False,
       ) + "\n"
@@ -79,7 +109,7 @@ async def _exchange(proc, code, hidden_tools, max_calls, captured):
   while True:
     line = await proc.stdout.readline()
     if not line:
-      stderr = (await proc.stderr.read()).decode("utf-8", errors="replace").strip()
+      stderr = await _stderr_text(stderr_task)
       return {
         "stdout": captured["stdout"],
         "result": None,
@@ -95,8 +125,11 @@ async def _exchange(proc, code, hidden_tools, max_calls, captured):
         "error": f"malformed runner message: {line.decode('utf-8', errors='replace').strip()}",
       }
 
+    if "stdout" in message and not message.get("done"):
+      captured["stdout"] += message["stdout"] or ""
+      continue
+
     if message.get("done"):
-      captured["stdout"] = message.get("stdout") or ""
       return {
         "stdout": captured["stdout"],
         "result": message.get("result"),
@@ -145,13 +178,19 @@ async def run(
       stdin=asyncio.subprocess.PIPE,
       stdout=asyncio.subprocess.PIPE,
       stderr=asyncio.subprocess.PIPE,
+      start_new_session=True,
+      limit=max(4 * max_output, 1 << 20),
     )
   except OSError as exc:
     return {"stdout": "", "result": None, "error": f"failed to start sandbox: {exc}"}
 
+  stderr_task = asyncio.ensure_future(_drain(proc.stderr, STDERR_CAP))
+
   try:
     outcome = await asyncio.wait_for(
-      _exchange(proc, code, hidden_tools, max_calls, captured),
+      _exchange(
+        proc, code, hidden_tools, max_calls, max_output, captured, stderr_task
+      ),
       timeout=timeout,
     )
   except asyncio.TimeoutError:
@@ -168,9 +207,29 @@ async def run(
       "error": f"sandbox failure: {type(exc).__name__}: {exc}",
     }
   finally:
-    if proc.returncode is None:
-      proc.kill()
-      await proc.wait()
+    await _cleanup(proc, stderr_task)
 
   outcome["stdout"] = truncate(outcome.get("stdout") or "", max_output)
   return outcome
+
+
+async def _cleanup(proc, stderr_task) -> None:
+  """Kill the whole process group and let go of the pipes, without blocking."""
+  if proc.returncode is None:
+    try:
+      os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except OSError:
+      with contextlib.suppress(ProcessLookupError):
+        proc.kill()
+
+    with contextlib.suppress(Exception):
+      await asyncio.wait_for(asyncio.shield(proc.wait()), CLEANUP_TIMEOUT)
+
+  stderr_task.cancel()
+  with contextlib.suppress(Exception):
+    await stderr_task
+
+  transport = getattr(proc, "_transport", None)
+  if transport is not None:
+    with contextlib.suppress(Exception):
+      transport.close()

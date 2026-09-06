@@ -31,7 +31,7 @@ are capped by `HARBOR_BOOST_CODEMODE_TIMEOUT` seconds,
 limit) are returned to the model as text rather than raised.
 
 The subprocess is isolated with `python -I -S`, but it shares Boost's filesystem
-and network. This is process isolation, not a security sandbox — do not expose
+and network. This is process isolation, not a security sandbox: do not expose
 it to untrusted prompts on a host you care about.
 
 Client-supplied tools in the request body are left untouched and are not visible
@@ -233,4 +233,7 @@ async def apply(chat, llm, config: dict | None = None):
     if cfg_final:
       await workflow_mod.complete_or_defer(llm, cfg)
   finally:
-    restore(hidden)
+    # A deferred final runs after `apply` returns and must still see only
+    # `execute_code`; both stores are request-scoped, so nothing outlives it.
+    if not cfg.get("defer_final"):
+      restore(hidden)

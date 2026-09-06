@@ -1,6 +1,7 @@
 """Unit tests for the codemode Boost module."""
 
 import os
+import subprocess
 import sys
 from contextlib import contextmanager
 from unittest.mock import MagicMock
@@ -236,6 +237,72 @@ class TestExecution:
     assert "3 call limit 2 reached" in limited
 
 
+  @pytest.mark.asyncio
+  async def test_output_cap_large_line(self):
+    """Output far past the reader's line limit degrades to truncated text."""
+    with request_context(), config_overrides(
+      TOOLS=["current_time"], CODEMODE_MAX_OUTPUT=200
+    ):
+      codemode.hide(codemode.catalog({}))
+
+      printed = await codemode.execute_code("print('y' * 5_000_000)")
+      returned = await codemode.execute_code("result = 'r' * 100000")
+      structured = await codemode.execute_code("result = ['z' * 1000] * 500")
+
+    for output in (printed, returned, structured):
+      assert "sandbox failure" not in output
+      assert "...[truncated to 200 chars]" in output
+      assert len(output) < 1000
+
+  @pytest.mark.asyncio
+  async def test_timeout_grandchild_and_stderr(self):
+    """Neither a stderr flood nor an orphan grandchild can outlive the timeout."""
+    import time
+
+    with request_context(), config_overrides(
+      TOOLS=["current_time"], CODEMODE_TIMEOUT=2
+    ):
+      codemode.hide(codemode.catalog({}))
+
+      started = time.monotonic()
+      flooded = await codemode.execute_code(
+        "import sys\n"
+        "print('before the flood')\n"
+        "sys.stderr.write('e' * 300_000)\n"
+        "while True:\n"
+        "  pass\n"
+      )
+      flood_elapsed = time.monotonic() - started
+
+      started = time.monotonic()
+      spawned = await codemode.execute_code(
+        "import subprocess\n"
+        "subprocess.Popen(['sleep', '31337'])\n"
+        "while True:\n"
+        "  pass\n"
+      )
+      spawn_elapsed = time.monotonic() - started
+
+    assert "error: timeout after 2s" in flooded
+    assert "before the flood" in flooded  # partial stdout survives the kill
+    assert "error: timeout after 2s" in spawned
+    assert flood_elapsed < 4
+    assert spawn_elapsed < 4
+
+    # Exact argv match: this session's own command line mentions the repro.
+    running = subprocess.run(["ps", "-eo", "args="], capture_output=True, text=True)
+    assert "sleep 31337" not in [
+      line.strip() for line in running.stdout.splitlines()
+    ]
+
+    zombies = subprocess.run(
+      ["ps", "-o", "stat=", "--ppid", str(os.getpid())],
+      capture_output=True,
+      text=True,
+    )
+    assert "Z" not in zombies.stdout
+
+
 class TestRegistryLifecycle:
   @pytest.mark.asyncio
   async def test_restores_registry(self):
@@ -265,6 +332,16 @@ class TestRegistryLifecycle:
       assert "timeout" in timed_out
       codemode.restore(hidden)
       assert set(tool_registry.get_local_tools()) == expected
+
+
+  @pytest.mark.asyncio
+  async def test_defer_final_keeps_execute_code(self):
+    """A deferred final still sees only `execute_code` after apply returns."""
+    with request_context(), config_overrides(TOOLS=["current_time", "finish"]):
+      await codemode.apply(make_chat(), make_llm(), {"defer_final": True})
+
+      defs = tool_registry.collect_tool_defs()
+      assert [item["function"]["name"] for item in defs] == ["__tool_execute_code"]
 
 
 class TestSandboxHelpers:
