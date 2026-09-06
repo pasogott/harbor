@@ -619,6 +619,36 @@ TOOLS_FILE_MAX_CHARS = Config[int](
     description="Maximum file size, in characters, accepted by the scratch file tools.",
 )
 
+CODEMODE_TIMEOUT = Config[int](
+    name="HARBOR_BOOST_CODEMODE_TIMEOUT",
+    type=int,
+    default="30",
+    description=(
+        "Maximum wall time, in seconds, for a single `execute_code` program in the "
+        "`codemode` module. The sandbox process is killed when it expires."
+    ),
+)
+
+CODEMODE_MAX_OUTPUT = Config[int](
+    name="HARBOR_BOOST_CODEMODE_MAX_OUTPUT",
+    type=int,
+    default="8000",
+    description=(
+        "Maximum number of characters of program output returned to the model by the "
+        "`codemode` module."
+    ),
+)
+
+CODEMODE_MAX_CALLS = Config[int](
+    name="HARBOR_BOOST_CODEMODE_MAX_CALLS",
+    type=int,
+    default="50",
+    description=(
+        "Maximum number of hidden tool calls a single `codemode` program may make. "
+        "Further calls are rejected with an error inside the program."
+    ),
+)
+
 TAVILY_API_KEY = Config[str](
     name="HARBOR_BOOST_TAVILY_API_KEY",
     type=str,
