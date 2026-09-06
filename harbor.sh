@@ -2887,7 +2887,7 @@ launch_workflow_services() {
     fi
 
     case "$1" in
-    quickhop | deephop)
+    quickhop | deephop | codemode)
         echo "searxng"
         ;;
     esac
@@ -3486,6 +3486,7 @@ launch_host_tool_command() {
     local models=""
     local config_only=false
     local launch_workflow=""
+    local launch_codemode=false
     local boost_tool_groups=()
     local boost_tools=()
     local boost_services=()
@@ -3536,6 +3537,10 @@ launch_host_tool_command() {
             launch_append_unique boost_tool_groups "web"
             shift
             ;;
+        --codemode)
+            launch_codemode=true
+            shift
+            ;;
         --workflow)
             if launch_option_value_missing "${2-}"; then
                 log_error "Usage: harbor launch $tool --workflow <preset>"
@@ -3563,6 +3568,14 @@ launch_host_tool_command() {
             ;;
         esac
     done
+
+    if $launch_codemode; then
+        if [ -n "$launch_workflow" ] && [ "$launch_workflow" != "codemode" ]; then
+            log_error "harbor launch does not support --codemode and --workflow together."
+            return 1
+        fi
+        launch_workflow="codemode"
+    fi
 
     if [ ${#boost_tool_groups[@]} -gt 0 ] && [ -n "$launch_workflow" ]; then
         log_error "harbor launch does not support --web and --workflow together."
@@ -3809,7 +3822,7 @@ run_launch_command() {
         echo "When an inference backend is already running, backend-specific compose"
         echo "overlays are included the same way they are for direct service CLI commands."
         echo "Host tool adapters accept launch options before the tool name: --backend,"
-        echo "--model, --config, --web, and --workflow."
+        echo "--model, --config, --web, --codemode, and --workflow."
         echo "Every argument after the tool name is passed to the launched tool unchanged."
         echo "--web starts Boost with web_search and read_url tools, starts SearXNG,"
         echo "and routes the tool to a generated boost-web-... workflow model."
@@ -3817,6 +3830,8 @@ run_launch_command() {
         echo "starts SearXNG when web research is required, and routes the tool to"
         echo "a prefixed model such as quickhop-qwen3.5:4b or autocheck-qwen3.5:4b."
         echo "No built-in workflow presets ship by default."
+        echo "--codemode is sugar for --workflow codemode: the model gets a single"
+        echo "execute_code tool and calls every other Boost tool from Python."
         echo "If no backend is running, host tool adapters start llamacpp by default."
         echo "Use --service before the handle to bypass host tool adapters for name-colliding services."
         echo
@@ -3828,6 +3843,7 @@ run_launch_command() {
         echo
         echo "Examples:"
         echo "  harbor launch --web --backend ollama --model qwen3.5:4b codex"
+        echo "  harbor launch --codemode --backend ollama --model qwen3.5:4b codex"
         echo "  harbor launch --workflow quickhop --backend ollama --model qwen3.5:4b codex"
         echo "  harbor launch --workflow autocheck --backend ollama --model qwen3.5:4b codex"
         echo "  harbor launch --backend ollama --model qwen3.5:4b codex"
@@ -3865,7 +3881,7 @@ run_launch_command() {
             launch_options+=("$1")
             shift
             ;;
-        --config | --web)
+        --config | --web | --codemode)
             launch_options+=("$1")
             shift
             ;;

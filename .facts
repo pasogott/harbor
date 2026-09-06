@@ -1440,16 +1440,16 @@
   tags: [codemode, codemode-boost, implemented]
 - label: harbor launch accepts --codemode in both launch parsers as sugar for --workflow codemode and rejects it together with --workflow
   command: grep -q -- '--codemode' harbor.sh && grep -q 'does not support --codemode and --workflow together' harbor.sh
-  tags: [spec, codemode, codemode-harbor]
+  tags: [codemode, codemode-harbor, implemented]
 - label: launch smoke suite covers --codemode routing to a codemode-prefixed model with boost and searxng started
   command: grep -q -- '--codemode' tests/suites/05-launch-smoke.sh && bash tests/suites/05-launch-smoke.sh
-  tags: [spec, codemode, codemode-harbor]
+  tags: [codemode, codemode-harbor, implemented]
 - label: codemode module is documented in the Boost modules doc and its env vars in the configuration doc and CLI reference mentions --codemode
   command: grep -q '^## codemode' docs/5.2.3-Harbor-Boost-Modules.md && grep -q '^## HARBOR_BOOST_CODEMODE_TIMEOUT' docs/5.2.2-Harbor-Boost-Configuration.md && grep -q -- '--codemode' docs/3.-Harbor-CLI-Reference.md
-  tags: [spec, codemode, codemode-harbor]
+  tags: [codemode, codemode-harbor, implemented]
 - label: HARBOR_BOOST_CODEMODE_TIMEOUT MAX_OUTPUT and MAX_CALLS have defaults in profiles/default.env and are passed through compose.boost.yml
   command: grep -q '^HARBOR_BOOST_CODEMODE_TIMEOUT=30' profiles/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_OUTPUT=8000' profiles/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_CALLS=50' profiles/default.env && grep -q 'HARBOR_BOOST_CODEMODE_TIMEOUT' services/compose.boost.yml
-  tags: [spec, codemode, codemode-harbor]
+  tags: [codemode, codemode-harbor, implemented]
 
 # testing
 - label: tests use a Deno orchestrator running sequential bash suites across containerized distros
