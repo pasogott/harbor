@@ -82,10 +82,10 @@
   command: test -f routines/deno.json && test $(find routines -name '*.ts' | wc -l) -ge 10
 - label: dev scripts live in .scripts/ and must be run via harbor dev, not directly
   command: test -d .scripts && test $(find .scripts -name '*.ts' -o -name '*.sh' | wc -l) -ge 20
-- label: harbor config get/set/search/update reads and writes workspace .env; defaults live in profiles/default.env
-  command: grep -q 'env_manager' harbor.sh && test -f profiles/default.env
-- label: harbor config update merges profiles/default.env into the active .env
-  command: grep -q 'config_update' harbor.sh || grep -q 'config update' harbor.sh
+- label: harbor config get/set/search/update reads and writes workspace .env; defaults live in profiles/default.env plus per-service services/<name>/default.env
+  command: grep -q 'env_manager' harbor.sh && test -f profiles/default.env && test -f services/chandra/default.env
+- label: harbor config update merges profiles/default.env and every services/*/default.env into the active .env
+  command: grep -q 'merge_default_env_files' harbor.sh && grep -q 'collect_default_env_files' harbor.sh
 - label: harbor compose up uses docker compose up -d --wait requiring Compose 2.23.1 or newer
   command: grep -q 'up -d --wait' harbor.sh && grep -q 'desired_compose_minor="23"' harbor.sh
   tags: [implemented]
@@ -185,6 +185,11 @@
 - label: check_hf_cache in harbor.sh uses 'hf cache ls' (scan-cache was removed in hf CLI 1.x)
   command: grep -q 'cache ls --no-truncate' harbor.sh && ! grep -q 'run_hf_docker_cli scan-cache' harbor.sh
   tags: [sweep7, implemented]
+
+## config
+- label: a service default defined only in services/<name>/default.env resolves through harbor config get on a fresh .env, with no copy in profiles/default.env
+  command: d=$(mktemp -d) && mkdir -p "$d/profiles" "$d/services/chandra" && cp profiles/default.env "$d/profiles/" && cp services/chandra/default.env "$d/services/chandra/" && cp harbor.sh "$d/" && out=$(HARBOR_HOME="$d" "$d/harbor.sh" config get chandra.host_port 2>/dev/null | tail -1); rm -rf "$d"; test "$out" = 35080 && test "$(grep -c HARBOR_CHANDRA profiles/default.env)" -eq 0
+  tags: [config, svc-defaults]
 
 # services
 - label: compose.yml defines only the shared harbor-network without service definitions
@@ -1466,8 +1471,8 @@
 - label: codemode module is documented in the Boost modules doc and its env vars in the configuration doc and CLI reference mentions --codemode
   command: grep -q '^## codemode' docs/5.2.3-Harbor-Boost-Modules.md && grep -q '^## HARBOR_BOOST_CODEMODE_TIMEOUT' docs/5.2.2-Harbor-Boost-Configuration.md && grep -q -- '--codemode' docs/3.-Harbor-CLI-Reference.md
   tags: [codemode, codemode-harbor, implemented]
-- label: HARBOR_BOOST_CODEMODE_TIMEOUT MAX_OUTPUT and MAX_CALLS have defaults in profiles/default.env and are passed through compose.boost.yml with inline defaults so a stale .env cannot inject empty values
-  command: grep -q '^HARBOR_BOOST_CODEMODE_TIMEOUT=30' profiles/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_OUTPUT=8000' profiles/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_CALLS=50' profiles/default.env && grep -q 'HARBOR_BOOST_CODEMODE_TIMEOUT=${HARBOR_BOOST_CODEMODE_TIMEOUT:-30}' services/compose.boost.yml && grep -q 'HARBOR_BOOST_CODEMODE_MAX_OUTPUT=${HARBOR_BOOST_CODEMODE_MAX_OUTPUT:-8000}' services/compose.boost.yml && grep -q 'HARBOR_BOOST_CODEMODE_MAX_CALLS=${HARBOR_BOOST_CODEMODE_MAX_CALLS:-50}' services/compose.boost.yml && cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k empty_env_uses_defaults
+- label: HARBOR_BOOST_CODEMODE_TIMEOUT MAX_OUTPUT and MAX_CALLS have defaults in services/boost/default.env and are passed through compose.boost.yml with inline defaults so a stale .env cannot inject empty values
+  command: grep -q '^HARBOR_BOOST_CODEMODE_TIMEOUT=30' services/boost/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_OUTPUT=8000' services/boost/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_CALLS=50' services/boost/default.env && grep -q 'HARBOR_BOOST_CODEMODE_TIMEOUT=${HARBOR_BOOST_CODEMODE_TIMEOUT:-30}' services/compose.boost.yml && grep -q 'HARBOR_BOOST_CODEMODE_MAX_OUTPUT=${HARBOR_BOOST_CODEMODE_MAX_OUTPUT:-8000}' services/compose.boost.yml && grep -q 'HARBOR_BOOST_CODEMODE_MAX_CALLS=${HARBOR_BOOST_CODEMODE_MAX_CALLS:-50}' services/compose.boost.yml && cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k empty_env_uses_defaults
   tags: [codemode, codemode-harbor, implemented]
 
 # testing
@@ -2043,10 +2048,10 @@
 
 # services > chandra
 - label: chandra is a backend service at services/compose.chandra.yml running Chandra 2 OCR on the vllm/vllm-openai image (HARBOR_CHANDRA_IMAGE, default vllm/vllm-openai, HARBOR_CHANDRA_VERSION default v0.17.0) on host port 35080 (container port 8000), with harbor config get chandra.host_port resolving to 35080
-  command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; HARBOR_CHANDRA_IMAGE=probe/img HARBOR_CHANDRA_VERSION=probe-ver HARBOR_CHANDRA_HOST_PORT=35080 C chandra | jq -e '.services.chandra | .image=="probe/img:probe-ver" and .container_name==(env.HARBOR_CONTAINER_PREFIX // "harbor")+".chandra" and (.ports|length==1) and .ports[0].target==8000 and .ports[0].published=="35080" and (.networks|has("harbor-network"))' >/dev/null && grep -q "^HARBOR_CHANDRA_HOST_PORT=35080$" profiles/default.env && grep -q "^HARBOR_CHANDRA_IMAGE=\"vllm/vllm-openai\"$" profiles/default.env && grep -q "^HARBOR_CHANDRA_VERSION=\"v0.17.0\"$" profiles/default.env && [ "$(./harbor.sh config get chandra.host_port)" = "35080" ]
+  command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; HARBOR_CHANDRA_IMAGE=probe/img HARBOR_CHANDRA_VERSION=probe-ver HARBOR_CHANDRA_HOST_PORT=35080 C chandra | jq -e '.services.chandra | .image=="probe/img:probe-ver" and .container_name==(env.HARBOR_CONTAINER_PREFIX // "harbor")+".chandra" and (.ports|length==1) and .ports[0].target==8000 and .ports[0].published=="35080" and (.networks|has("harbor-network"))' >/dev/null && grep -q "^HARBOR_CHANDRA_HOST_PORT=35080$" services/chandra/default.env && grep -q "^HARBOR_CHANDRA_IMAGE=\"vllm/vllm-openai\"$" services/chandra/default.env && grep -q "^HARBOR_CHANDRA_VERSION=\"v0.17.0\"$" services/chandra/default.env && [ "$(./harbor.sh config get chandra.host_port)" = "35080" ]
   tags: [chandra, implemented]
 - label: chandra serves the model from HARBOR_CHANDRA_MODEL (default datalab-to/chandra-ocr-2) under the OpenAI model name chandra (--served-model-name chandra), bakes --max-num-seqs 16 --max-num-batched-tokens 2048 into the vllm command (vLLM 0.17 cudagraph warm-up asserts on this hybrid model at the default 256), and appends HARBOR_CHANDRA_EXTRA_ARGS (default empty) verbatim after them so users can override
-  command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; HARBOR_CHANDRA_MODEL=probe-model HARBOR_CHANDRA_EXTRA_ARGS="--probe-flag probe-val" C chandra | jq -e '.services.chandra.command | (index("--model") as $i | $i!=null and .[$i+1]=="probe-model") and (index("--served-model-name") as $i | $i!=null and .[$i+1]=="chandra") and (index("--max-num-seqs") as $i | $i!=null and .[$i+1]=="16") and (index("--max-num-batched-tokens") as $i | $i!=null and .[$i+1]=="2048") and (index("--probe-flag") as $i | $i!=null and .[$i+1]=="probe-val" and $i > (index("--max-num-seqs")))' >/dev/null && C chandra | jq -e '.services.chandra.command | index("datalab-to/chandra-ocr-2")!=null' >/dev/null && grep -q "^HARBOR_CHANDRA_MODEL=\"datalab-to/chandra-ocr-2\"$" profiles/default.env && grep -q "^HARBOR_CHANDRA_EXTRA_ARGS=\"\"$" profiles/default.env
+  command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; HARBOR_CHANDRA_MODEL=probe-model HARBOR_CHANDRA_EXTRA_ARGS="--probe-flag probe-val" C chandra | jq -e '.services.chandra.command | (index("--model") as $i | $i!=null and .[$i+1]=="probe-model") and (index("--served-model-name") as $i | $i!=null and .[$i+1]=="chandra") and (index("--max-num-seqs") as $i | $i!=null and .[$i+1]=="16") and (index("--max-num-batched-tokens") as $i | $i!=null and .[$i+1]=="2048") and (index("--probe-flag") as $i | $i!=null and .[$i+1]=="probe-val" and $i > (index("--max-num-seqs")))' >/dev/null && C chandra | jq -e '.services.chandra.command | index("datalab-to/chandra-ocr-2")!=null' >/dev/null && grep -q "^HARBOR_CHANDRA_MODEL=\"datalab-to/chandra-ocr-2\"$" services/chandra/default.env && grep -q "^HARBOR_CHANDRA_EXTRA_ARGS=\"\"$" services/chandra/default.env
   tags: [chandra, implemented]
 - label: chandra mounts the host HuggingFace cache (HARBOR_HF_CACHE, falling back to ./services/chandra/.hf-cache) at /root/.cache/huggingface and passes HARBOR_HF_TOKEN as HUGGING_FACE_HUB_TOKEN, so the OCR weights are downloaded once into the standard cache layout
   command: C(){ $(./harbor.sh cmd --no-defaults "$@") config --format json; }; HARBOR_HF_CACHE=/probe-cache HARBOR_HF_TOKEN=probe-tok C chandra | jq -e '.services.chandra | ([.volumes[]|select(.type=="bind" and .source=="/probe-cache" and .target=="/root/.cache/huggingface")]|length==1) and .environment.HUGGING_FACE_HUB_TOKEN=="probe-tok"' >/dev/null && grep -q "HARBOR_HF_CACHE:-./services/chandra/.hf-cache}:/root/.cache/huggingface" services/compose.chandra.yml

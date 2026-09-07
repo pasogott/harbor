@@ -821,17 +821,24 @@ run_harbor_doctor() {
             log_warn "  Found $env_issues .env issue(s). Run 'harbor config update' to regenerate from defaults."
         fi
 
-        # Warn about stale keys: present in .env but absent from profiles/default.env
+        # Warn about stale keys: present in .env but absent from every
+        # default source (profiles/default.env + services/*/default.env)
         if [ -f "$default_profile" ] && [ -r "$default_profile" ]; then
             local stale_count=0
             local stale_keys=""
             local env_key
+            # Bash 3 compatible array fill (no mapfile/readarray)
+            local doctor_defaults=()
+            local doctor_default_file
+            while IFS= read -r doctor_default_file; do
+                doctor_defaults+=("$doctor_default_file")
+            done < <(collect_default_env_files)
             while IFS= read -r line || [ -n "$line" ]; do
                 [[ -z "$line" || "$line" =~ ^[[:space:]]*# || "$line" != *=* ]] && continue
                 env_key="${line%%=*}"
                 # Skip non-HARBOR_ keys (user-added, system, etc.)
                 [[ "$env_key" != HARBOR_* ]] && continue
-                if ! grep -q "^${env_key}=" "$default_profile" 2>/dev/null; then
+                if ! grep -qh "^${env_key}=" "${doctor_defaults[@]}" 2>/dev/null; then
                     stale_count=$((stale_count + 1))
                     if [ "$stale_count" -le 5 ]; then
                         stale_keys="${stale_keys:+$stale_keys, }$env_key"
@@ -6032,6 +6039,64 @@ set_colors() {
     nok="${c_r}✘${c_nc}"
 }
 
+# Default configuration is assembled from profiles/default.env plus a
+# per-service services/<name>/default.env holding that service's
+# HARBOR_<NAME>_* keys. Prints one path per line, profile first, services
+# sorted (glob order).
+collect_default_env_files() {
+    printf '%s\n' "$default_profile"
+    local svc_default
+    for svc_default in "$harbor_home"/services/*/default.env; do
+        [ -f "$svc_default" ] && printf '%s\n' "$svc_default"
+    done
+    return 0
+}
+
+# Concatenate every default env source into $1, guaranteeing a newline
+# between files so a source without a trailing newline cannot glue its last
+# key onto the next file's first line.
+build_default_env_file() {
+    local out_file=$1
+    local src
+
+    : >"$out_file" || return 1
+
+    while IFS= read -r src; do
+        cat "$src" >>"$out_file" || return 1
+        if [ -s "$out_file" ] && [ -n "$(tail -c1 "$out_file")" ]; then
+            printf '\n' >>"$out_file"
+        fi
+    done < <(collect_default_env_files)
+}
+
+# merge_env_files against the combined defaults (profile + per-service files).
+merge_default_env_files() {
+    local target_file=${1:-.env}
+    local combined
+
+    if [ ! -f "$default_profile" ]; then
+        log_error "Default profile not found: $default_profile"
+        log_error "Your Harbor installation may be corrupted. Try reinstalling with: curl -sS https://get.harbor.sh | bash"
+        return 1
+    fi
+
+    combined=$(mktemp -t harbor.XXXXXX) || {
+        log_error "Failed to create temporary file for config merge."
+        return 1
+    }
+
+    if ! build_default_env_file "$combined"; then
+        rm -f "$combined" 2>/dev/null
+        log_error "Failed to assemble default configuration."
+        return 1
+    fi
+
+    local merge_rc=0
+    merge_env_files "$combined" "$target_file" "default configuration" || merge_rc=$?
+    rm -f "$combined" 2>/dev/null
+    return $merge_rc
+}
+
 ensure_env_file() {
     local src_file=$default_profile
     local tgt_file=".env"
@@ -6049,7 +6114,7 @@ ensure_env_file() {
             return 1
         fi
         echo "Creating .env file..."
-        if ! cp "$src_file" "$tgt_file"; then
+        if ! build_default_env_file "$tgt_file"; then
             log_error "Failed to create .env file from $src_file"
             return 1
         fi
@@ -6070,6 +6135,9 @@ reset_env_file() {
 merge_env_files() {
     local default_file=$1
     local target_file=$2
+    # Optional display name for logs — callers merging a temporary combined
+    # defaults file pass a human-readable label instead of the temp path.
+    local source_label=${3:-}
 
     if [ -z "$default_file" ]; then
         default_file=$default_profile
@@ -6077,6 +6145,10 @@ merge_env_files() {
 
     if [ -z "$target_file" ]; then
         target_file=".env"
+    fi
+
+    if [ -z "$source_label" ]; then
+        source_label=$default_file
     fi
 
     if [[ ! -f "$default_file" ]]; then
@@ -6088,7 +6160,7 @@ merge_env_files() {
     # Check if both files exist
     if [[ ! -f "$target_file" ]]; then
         cp "$default_file" "$target_file"
-        echo "Copied $default_file to $target_file"
+        echo "Copied $source_label to $target_file"
         return
     fi
 
@@ -6182,7 +6254,7 @@ merge_env_files() {
     # Clear the RETURN trap since temp_file has been moved (no longer exists)
     trap - RETURN
 
-    log_info "Merged content from $default_file into $target_file, preserving order and structure"
+    log_info "Merged content from $source_label into $target_file, preserving order and structure"
 }
 
 execute_and_process() {
@@ -6667,7 +6739,7 @@ env_manager() {
         ;;
     update)
         shift
-        merge_env_files
+        merge_default_env_files
         ;;
     search | find)
         if command -v deno &>/dev/null || _check_docker 2>/dev/null; then
@@ -7712,7 +7784,7 @@ harbor_profile_merge() {
         log_error "Failed to merge current config into profile."
         return 1
     fi
-    if ! merge_env_files "$default_profile" "$tmp_env_merge"; then
+    if ! merge_default_env_files "$tmp_env_merge"; then
         rm -f "$tmp_env_merge" 2>/dev/null
         log_error "Failed to merge default profile."
         return 1
@@ -8387,7 +8459,7 @@ update_harbor() {
     fi
 
     log_info "Merging .env files..."
-    if ! merge_env_files; then
+    if ! merge_default_env_files; then
         log_warn "Config merge encountered issues. Your .env may need manual review."
         log_warn "Run 'harbor config update' to retry, or compare with profiles/default.env"
         if [ -n "$old_version" ]; then
