@@ -74,6 +74,15 @@
 - label: local Deno runtime caches under .deno-cache are ignored by Git
   command: git check-ignore -q .deno-cache/latest.txt
   tags: [spec, implemented]
+- label: release.sh rebuilds the boost image before 'harbor dev docs', so the generated Boost docs never come from a stale local image
+  command: grep -n 'harbor build boost' .scripts/release.sh | head -1 | cut -d: -f1 | { read -r b; d=$(grep -n 'harbor dev docs' .scripts/release.sh | head -1 | cut -d: -f1); [ -n "$b" ] && [ "$b" -lt "$d" ]; }
+  tags: [docgen, implemented]
+- label: 'harbor dev docs --check' regenerates the Boost docgen targets without writing and exits non-zero when docs/5.2.2 or docs/5.2.3 would change
+  command: ./harbor.sh dev docs --check
+  tags: [docgen, implemented]
+- label: docgen prints the boost source commit and the resolved local boost image id it generated the docs from
+  command: ./harbor.sh dev docs --check 2>&1 | grep -q '^docgen image: .*-boost sha256:'
+  tags: [docgen, implemented]
 
 # cli
 - label: harbor.sh is the main CLI entrypoint, a Bash script over 5000 lines
