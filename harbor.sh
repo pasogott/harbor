@@ -827,7 +827,7 @@ run_harbor_doctor() {
             local stale_count=0
             local stale_keys=""
             local env_key
-            # Bash 3 compatible array fill (no mapfile/readarray)
+            # Bash 3 compatible array fill (no bash-4 array builtins)
             local doctor_defaults=()
             local doctor_default_file
             while IFS= read -r doctor_default_file; do
@@ -1663,14 +1663,15 @@ run_down() {
         echo "untouched."
         echo
         echo "Options:"
-        echo "  --volumes, -v       Remove named volumes declared in compose files"
+        echo "  --volumes, -v       Remove volumes: named volumes for a bare 'down';"
+        echo "                      anonymous volumes only when services are named"
         echo "  --rmi <type>        Remove images (\"local\" or \"all\"), bare 'down' only"
         echo "  --timeout, -t <s>   Shutdown timeout in seconds (default: 10)"
         echo
         echo "Examples:"
         echo "  harbor down                 Stop all running services"
         echo "  harbor down ollama webui    Stop only ollama and webui"
-        echo "  harbor down --volumes       Stop all and remove volumes"
+        echo "  harbor down --volumes       Stop all and remove named volumes"
         echo "  harbor down --rmi local     Stop all and remove locally-built images"
         echo
         echo "See also: harbor restart, harbor ps"

@@ -30,7 +30,7 @@ Harbor is a CLI and companion app that lets you spin up a complete local LLM sta
 
 ## News
 
-- **v0.5.7** - New Chandra 2 OCR backend serving Datalab's document OCR model over an OpenAI-compatible API
+- **v0.5.7** - New Chandra 2 OCR backend, a Boost `codemode` module with `harbor launch --codemode` that lets a model drive every Boost tool from a single Python program, scoped `harbor down <service>` and `harbor restart <service>` that leave other running services alone, a far smaller `ollama-init` sidecar, per-service `services/<name>/default.env` defaults, and `harbor dev docs --check` to catch stale generated docs
 - **v0.5.6** - Six new services — Text Embeddings Inference, LightRAG, Paperless-ngx, Paperless-GPT, Whishper, and Linkwarden — with Ollama, llama.cpp, Open WebUI, LibreChat, AnythingLLM, and Traefik integrations
 - **v0.5.5** - Workspace files now stay owned by your host user across 20+ services, new Speech-to-Speech (s2s) backend, Dify 1.x and DeerFlow v2 upgrades, and a large repair sweep restoring dozens of services on current upstream images
 - **v0.5.4** - Repairs first-boot and integration failures across 20+ services found by the new runnable integration suite, plus Boost error responses that propagate real backend status codes
