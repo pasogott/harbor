@@ -186,6 +186,11 @@
   command: grep -q 'cache ls --no-truncate' harbor.sh && ! grep -q 'run_hf_docker_cli scan-cache' harbor.sh
   tags: [sweep7, implemented]
 
+## down
+- label: harbor down <service> and harbor restart <service> touch only the named services and their <service>-* companions: down uses compose stop + rm -f (never a project-wide down --remove-orphans) and restart brings the set back with an explicitly named up, so unrelated running services are never stopped or recreated
+  command: bash -c 'd=$(mktemp -d); export L=$(mktemp); printf "%s\n" "#!/usr/bin/env bash" "case \"\$*\" in *\"compose version\"*) echo v2.30.0; exit 0;; *\"config --services\"*) printf \"ollama\nboost\n\"; exit 0;; *\"compose ps\"*) echo ollama; exit 0;; esac" "[ \"\$1\" = compose ] && printf \"%s\n\" \"\$*\" >> \"\$L\"" "exit 0" > "$d/docker"; chmod +x "$d/docker"; export HARBOR_LEGACY_CLI=true HARBOR_CAPABILITIES_AUTODETECT=false PATH="$d:$PATH"; ./harbor.sh down boost >/dev/null 2>&1 && ./harbor.sh restart boost >/dev/null 2>&1 && grep -q -- " stop --timeout 10 boost$" "$L" && grep -q -- " rm -f boost$" "$L" && grep -q -- " up -d --wait boost$" "$L" && ! grep -q -- "--remove-orphans" "$L" && ! grep -Eq -- " (stop|rm -f|up -d --wait) .*(ollama|webui|llamacpp)" "$L"'
+  tags: [cli, down-scope, implemented]
+
 # services
 - label: compose.yml defines only the shared harbor-network without service definitions
   command: grep -q 'harbor-network' compose.yml && ! grep -q '^services:' compose.yml
