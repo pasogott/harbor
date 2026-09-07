@@ -180,7 +180,7 @@ Userland validation of the five services added after v0.5.5, from a cold start, 
 > `nvidia` cross-file must never be started here (see Prerequisites). Run this group only on a
 > host with an NVIDIA GPU and the container toolkit installed; otherwise mark every test SKIP.
 >
-> Last verified on the `pop-os` box (RTX 4090 Laptop, 16GB) from a throwaway `/tmp` clone:
+> Last verified on a 16GB RTX 4090 Laptop GPU host from a throwaway `/tmp` clone:
 > healthy in ~80s after the weights were cached, ~13.9GB VRAM steady at the default
 > `--max-model-len 18000`, OCR completion returned the expected text. Budget ~14GB of free
 > VRAM, not the whole card.
