@@ -6,7 +6,6 @@ import log
 import research.workflow as workflow_mod
 import tools.registry
 from modules import tools as tools_mod
-from state import request_store
 from tools.registry import LOCAL_TOOL_PREFIX
 
 ID_PREFIX = 'codemode'
@@ -22,7 +21,9 @@ plus workspace tools when `HARBOR_BOOST_WORKSPACE_ROOT` is set) and absorbs any
 tools an earlier workflow step registered. All of them are then hidden from the
 downstream LLM: it only ever sees `execute_code(code)`. Their signatures and
 docstring summaries are rendered into a system message so the model knows what
-it may call.
+it may call. Hidden tools stay in the local registry, so a model that ignores
+the prompt and calls one by name is still served by Boost instead of having the
+call passed back to the API client.
 
 Output comes back from `print(...)` and from a variable named `result`. Programs
 are capped by `HARBOR_BOOST_CODEMODE_TIMEOUT` seconds,
@@ -58,8 +59,6 @@ docker run \\
 
 logger = log.setup_logger(ID_PREFIX)
 
-HIDDEN_STORE = "codemode_hidden_tools"
-
 JSON_TO_PYTHON = {
   "string": "str",
   "integer": "int",
@@ -78,6 +77,8 @@ Rules:
 - Get output back with `print(...)` or by assigning to a variable named
   `result`. Only printed output and `result` come back to you, nothing else.
 - Prefer a single program that does all of the work over several calls.
+- The functions above are not tools. `execute_code` is the only tool you can
+  call; the functions only exist inside the Python program you pass to it.
 """.strip()
 
 
@@ -89,10 +90,9 @@ async def execute_code(code: str) -> str:
   Args:
     code (str): Complete Python program to execute.
   """
-  hidden = request_store(HIDDEN_STORE, {})
   outcome = await codemode_sandbox.run(
     code,
-    hidden,
+    tools.registry.get_hidden_tools(),
     timeout=config.CODEMODE_TIMEOUT.value,
     max_output=config.CODEMODE_MAX_OUTPUT.value,
     max_calls=config.CODEMODE_MAX_CALLS.value,
@@ -204,23 +204,23 @@ def catalog(cfg: dict) -> dict:
 
 
 def hide(local_tools: dict) -> dict:
-  """Move every tool except `execute_code` into the request-scoped hidden store."""
-  hidden = request_store(HIDDEN_STORE, {})
+  """Stop advertising every tool except `execute_code`, keep them callable."""
   keep = tools.registry.resolve_local_tool_name("execute_code")
 
   for key in list(local_tools):
     if key == keep:
       continue
-    hidden[key] = local_tools.pop(key)
+    tools.registry.hide_local_tool(key)
 
-  return hidden
+  return tools.registry.get_hidden_tools()
 
 
 def restore(hidden: dict) -> None:
-  """Put the hidden tools back and stop advertising `execute_code`."""
+  """Advertise the hidden tools again and stop advertising `execute_code`."""
+  for key in list(hidden):
+    tools.registry.unhide_local_tool(key)
+
   local_tools = tools.registry.get_local_tools()
-  local_tools.update(hidden)
-  hidden.clear()
   local_tools.pop(tools.registry.resolve_local_tool_name("execute_code"), None)
 
 

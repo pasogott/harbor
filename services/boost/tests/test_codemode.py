@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -28,10 +29,9 @@ def request_context():
     yield req
   finally:
     request_state.reset(token_req)
-    if hasattr(req.state, "local_tools"):
-      delattr(req.state, "local_tools")
-    if hasattr(req.state, codemode.HIDDEN_STORE):
-      delattr(req.state, codemode.HIDDEN_STORE)
+    for attribute in ("local_tools", "hidden_local_tools"):
+      if hasattr(req.state, attribute):
+        delattr(req.state, attribute)
 
 
 @contextmanager
@@ -121,9 +121,33 @@ class TestAdvertisedTools:
         LOCAL_TOOL_PREFIX + "finish",
         LOCAL_TOOL_PREFIX + "earlier_step_tool",
       }
-      assert list(tool_registry.get_local_tools()) == [
+      assert [
+        item["function"]["name"] for item in tool_registry.collect_tool_defs()
+      ] == [LOCAL_TOOL_PREFIX + "execute_code"]
+      assert set(tool_registry.get_local_tools()) == set(hidden) | {
         LOCAL_TOOL_PREFIX + "execute_code"
-      ]
+      }
+
+  @pytest.mark.asyncio
+  async def test_direct_call_of_hidden_tool_executes_server_side(self):
+    """A model that calls a hidden tool by name is served by Boost, not the client."""
+    with request_context(), config_overrides(TOOLS=["current_time", "finish"]):
+      codemode.hide(codemode.catalog({}))
+
+      # The exact branch `llm.py` takes for every incoming tool call.
+      for name in ("current_time", "finish", "__tool_current_time"):
+        assert tool_registry.is_local_tool(name), (
+          f"{name} would be passed back to the API client"
+        )
+
+      stamp = await tool_registry.call_local_tool("current_time", timezone="UTC")
+      answer = await tool_registry.call_local_tool("finish", answer="done")
+
+      assert "T" in stamp
+      assert "done" in answer
+      assert [
+        item["function"]["name"] for item in tool_registry.collect_tool_defs()
+      ] == [LOCAL_TOOL_PREFIX + "execute_code"]
 
   @pytest.mark.asyncio
   async def test_client_tools_untouched(self):
@@ -160,6 +184,7 @@ class TestPrompt:
     assert "Return the current date and time in a named timezone." in prompt
     assert "finish(answer: str) -> str" in prompt
     assert "execute_code(code)" in prompt
+    assert "The functions above are not tools." in prompt
     assert "print(...)" in prompt
     assert "result" in prompt
 
@@ -191,8 +216,9 @@ class TestExecution:
   @pytest.mark.asyncio
   async def test_program_error(self):
     with request_context(), config_overrides(TOOLS=["current_time"]):
-      hidden = codemode.hide(codemode.catalog({}))
-      hidden[LOCAL_TOOL_PREFIX + "failing_tool"] = failing_tool
+      codemode.hide(codemode.catalog({}))
+      tool_registry.set_local_tool("failing_tool", failing_tool)
+      tool_registry.hide_local_tool("failing_tool")
 
       crash = await codemode.execute_code("raise ValueError('boom')")
       caught = await codemode.execute_code(
@@ -208,15 +234,16 @@ class TestExecution:
       assert "caught ValueError: nope" in caught
 
       # The tool loop keeps working after both failures.
-      assert list(tool_registry.get_local_tools()) == [
-        LOCAL_TOOL_PREFIX + "execute_code"
-      ]
+      assert [
+        item["function"]["name"] for item in tool_registry.collect_tool_defs()
+      ] == [LOCAL_TOOL_PREFIX + "execute_code"]
 
   @pytest.mark.asyncio
   async def test_output_and_call_caps(self):
     with request_context(), config_overrides(TOOLS=["current_time"], CODEMODE_MAX_CALLS=2):
-      hidden = codemode.hide(codemode.catalog({}))
-      hidden[LOCAL_TOOL_PREFIX + "echo_tool"] = echo_tool
+      codemode.hide(codemode.catalog({}))
+      tool_registry.set_local_tool("echo_tool", echo_tool)
+      tool_registry.hide_local_tool("echo_tool")
 
       with config_overrides(CODEMODE_MAX_OUTPUT=50):
         capped = await codemode.execute_code("print('x' * 500)")
@@ -374,6 +401,20 @@ class TestRegistryLifecycle:
 
 
   @pytest.mark.asyncio
+  async def test_restore_readvertises_hidden_tools(self):
+    """Unwinding clears the hidden marks, not just the registry contents."""
+    with request_context(), config_overrides(TOOLS=["current_time", "finish"]):
+      hidden = codemode.hide(codemode.catalog({}))
+      assert tool_registry.is_hidden_local_tool("current_time")
+
+      codemode.restore(hidden)
+
+      assert tool_registry.get_hidden_tool_names() == set()
+      assert sorted(
+        item["function"]["name"] for item in tool_registry.collect_tool_defs()
+      ) == [LOCAL_TOOL_PREFIX + "current_time", LOCAL_TOOL_PREFIX + "finish"]
+
+  @pytest.mark.asyncio
   async def test_defer_final_keeps_execute_code(self):
     """A deferred final still sees only `execute_code` after apply returns."""
     with request_context(), config_overrides(TOOLS=["current_time", "finish"]):
@@ -381,6 +422,23 @@ class TestRegistryLifecycle:
 
       defs = tool_registry.collect_tool_defs()
       assert [item["function"]["name"] for item in defs] == ["__tool_execute_code"]
+
+
+class TestConfiguration:
+  def test_empty_env_uses_defaults(self):
+    """Compose injects "" when .env predates the module; Boost must still boot."""
+    from config import Config
+
+    knobs = [
+      config.CODEMODE_TIMEOUT,
+      config.CODEMODE_MAX_OUTPUT,
+      config.CODEMODE_MAX_CALLS,
+    ]
+
+    with patch.dict(os.environ, {knob.name: "" for knob in knobs}, clear=False):
+      for knob in knobs:
+        fresh = Config[int](name=knob.name, type=int, default=knob.default)
+        assert fresh.value == int(knob.default)
 
 
 class TestSandboxHelpers:

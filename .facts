@@ -1430,8 +1430,8 @@
   tags: [spec, implemented, boost-error-logging]
 
 ## codemode
-- label: codemode advertises exactly one local tool __tool_execute_code with a single code parameter and hides every other registered local tool from collect_tool_defs
-  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k advertises_single_tool
+- label: codemode advertises exactly one local tool __tool_execute_code with a single code parameter and excludes every other registered local tool from collect_tool_defs while keeping it executable server-side when a model calls it by name
+  command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k "advertises_single_tool or direct_call_of_hidden_tool"
   tags: [codemode, codemode-boost, implemented]
 - label: codemode registers HARBOR_BOOST_TOOLS via the tools module selection and absorbs local tools registered by earlier workflow steps into the hidden catalog
   command: cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k catalog_absorbs
@@ -1466,8 +1466,8 @@
 - label: codemode module is documented in the Boost modules doc and its env vars in the configuration doc and CLI reference mentions --codemode
   command: grep -q '^## codemode' docs/5.2.3-Harbor-Boost-Modules.md && grep -q '^## HARBOR_BOOST_CODEMODE_TIMEOUT' docs/5.2.2-Harbor-Boost-Configuration.md && grep -q -- '--codemode' docs/3.-Harbor-CLI-Reference.md
   tags: [codemode, codemode-harbor, implemented]
-- label: HARBOR_BOOST_CODEMODE_TIMEOUT MAX_OUTPUT and MAX_CALLS have defaults in profiles/default.env and are passed through compose.boost.yml
-  command: grep -q '^HARBOR_BOOST_CODEMODE_TIMEOUT=30' profiles/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_OUTPUT=8000' profiles/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_CALLS=50' profiles/default.env && grep -q 'HARBOR_BOOST_CODEMODE_TIMEOUT' services/compose.boost.yml
+- label: HARBOR_BOOST_CODEMODE_TIMEOUT MAX_OUTPUT and MAX_CALLS have defaults in profiles/default.env and are passed through compose.boost.yml with inline defaults so a stale .env cannot inject empty values
+  command: grep -q '^HARBOR_BOOST_CODEMODE_TIMEOUT=30' profiles/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_OUTPUT=8000' profiles/default.env && grep -q '^HARBOR_BOOST_CODEMODE_MAX_CALLS=50' profiles/default.env && grep -q 'HARBOR_BOOST_CODEMODE_TIMEOUT=${HARBOR_BOOST_CODEMODE_TIMEOUT:-30}' services/compose.boost.yml && grep -q 'HARBOR_BOOST_CODEMODE_MAX_OUTPUT=${HARBOR_BOOST_CODEMODE_MAX_OUTPUT:-8000}' services/compose.boost.yml && grep -q 'HARBOR_BOOST_CODEMODE_MAX_CALLS=${HARBOR_BOOST_CODEMODE_MAX_CALLS:-50}' services/compose.boost.yml && cd services/boost && uv run pytest tests/test_codemode.py -q --tb=no -k empty_env_uses_defaults
   tags: [codemode, codemode-harbor, implemented]
 
 # testing

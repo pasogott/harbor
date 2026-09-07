@@ -105,7 +105,14 @@ class Config(Generic[T]):
         raw_value = os.getenv(self.name, self.default)
         if isinstance(raw_value, list):
             raw_value = raw_value[0] if raw_value else ""
+        if not raw_value.strip() and not self._accepts_empty():
+            # Compose injects "" for keys missing from .env - for numbers that
+            # is "unset", not a value.
+            raw_value = self.default
         return self._convert_value(raw_value)
+
+    def _accepts_empty(self) -> bool:
+        return self.type not in (int, float)
 
     def _resolve_wildcard(self) -> List[T]:
         prefix = self.name.replace("*", "")
