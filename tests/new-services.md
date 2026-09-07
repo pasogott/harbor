@@ -179,12 +179,17 @@ Userland validation of the five services added after v0.5.5, from a cold start, 
 > **SKIPPED on this host.** Chandra is GPU-only and the reference host is ROCm/AMD, so the
 > `nvidia` cross-file must never be started here (see Prerequisites). Run this group only on a
 > host with an NVIDIA GPU and the container toolkit installed; otherwise mark every test SKIP.
+>
+> Last verified on the `pop-os` box (RTX 4090 Laptop, 16GB) from a throwaway `/tmp` clone:
+> healthy in ~80s after the weights were cached, ~13.9GB VRAM steady at the default
+> `--max-model-len 18000`, OCR completion returned the expected text. Budget ~14GB of free
+> VRAM, not the whole card.
 
 ### Test 6.1: Cold start and OCR chat completion
 **Steps:**
 1. Skip check: `nvidia-smi` must succeed. If it does not, record SKIP for 6.1 and stop.
 2. `./harbor.sh config get chandra.host_port` prints `35080`.
-3. `./harbor.sh up --no-defaults chandra nvidia`; poll `http://localhost:35080/health` until 200 (first run downloads ~10GB of weights, allow up to 30 min).
+3. `./harbor.sh up --no-defaults chandra nvidia`; poll `http://localhost:35080/health` until 200 (first run downloads ~9.9GB of weights, allow up to 30 min; on a warm cache it is healthy in ~80s).
 4. `curl -s http://localhost:35080/v1/models | jq -r '.data[].id'`.
 5. OCR a real page: fetch any text-bearing PNG (e.g. `curl -sL -o /tmp/page.png https://raw.githubusercontent.com/datalab-to/chandra/main/static/images/example.png` or use a local scan), then
    `IMG=$(base64 -w0 /tmp/page.png); curl -s http://localhost:35080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"chandra","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,'"$IMG"'"}},{"type":"text","text":"Convert this page to markdown."}]}],"max_tokens":2048}'`.
@@ -193,7 +198,8 @@ Userland validation of the five services added after v0.5.5, from a cold start, 
 **Expectations:**
 1. `harbor.chandra` running and healthy (`docker inspect -f '{{.State.Health.Status}}' harbor.chandra` = `healthy`).
 2. `/v1/models` lists exactly `chandra` (not the Hugging Face id).
-3. The `/v1/chat/completions` call returns 200 and `choices[0].message.content` contains text actually present in the image.
-4. `docker logs harbor.chandra` shows the vLLM engine started with `--served-model-name chandra` and no CUDA OOM.
+3. The `/v1/chat/completions` call returns 200 and `choices[0].message.content` contains text actually present in the image. The raw content also carries an empty `<think></think>` block and HTML-ish markup (possibly unbalanced) — that is expected, match on the text, not on clean Markdown.
+4. `docker logs harbor.chandra` shows the vLLM engine started with `--served-model-name chandra`, no CUDA OOM and no `assert num_cache_lines >= batch` (the latter means `--max-num-seqs 16` was overridden away).
+   `nvidia-smi` reports ~13.9GB used by the container, idle and during the request alike.
 5. Weights landed in `${HARBOR_HF_CACHE}/hub/models--datalab-to--chandra-ocr-2`.
 6. `./harbor.sh down chandra` exits 0 and the container is gone.

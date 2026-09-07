@@ -11,6 +11,9 @@ services:
       - HUGGING_FACE_HUB_TOKEN=${HARBOR_HF_TOKEN}
     # Flags mirror upstream's chandra_vllm launcher; the mm-processor pixel
     # bounds are what the OCR model was tuned for and are not vLLM defaults.
+    # --max-num-seqs 16 is required, not a tuning knob: vLLM 0.17's cudagraph
+    # warm-up asserts causal_conv1d num_cache_lines >= batch on this hybrid
+    # Qwen3.5/GDN model at the default max_num_seqs 256. EXTRA_ARGS still wins.
     command: >
       --model ${HARBOR_CHANDRA_MODEL}
       --served-model-name chandra
@@ -19,6 +22,8 @@ services:
       --gpu-memory-utilization 0.85
       --enable-prefix-caching
       --mm-processor-kwargs '{"min_pixels":3136,"max_pixels":6291456}'
+      --max-num-seqs 16
+      --max-num-batched-tokens 2048
       ${HARBOR_CHANDRA_EXTRA_ARGS}
     volumes:
       # Standard HF hub layout, shared with vLLM/TEI/llama.cpp
