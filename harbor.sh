@@ -6143,18 +6143,35 @@ collect_default_env_files() {
 # Concatenate every default env source into $1, guaranteeing a newline
 # between files so a source without a trailing newline cannot glue its last
 # key onto the next file's first line.
+# Assembly is done in a private temp file next to the target and renamed into
+# place, so several harbor processes repairing the same .env at once cannot
+# append into each other's partial output (which left .env with every key
+# duplicated once per racing process).
 build_default_env_file() {
     local out_file=$1
     local src
+    local out_dir
+    local tmp_out
 
-    : >"$out_file" || return 1
+    out_dir=$(dirname "$out_file")
+    tmp_out=$(mktemp "$out_dir/.harbor-defaults.XXXXXX") || return 1
 
     while IFS= read -r src; do
-        cat "$src" >>"$out_file" || return 1
-        if [ -s "$out_file" ] && [ -n "$(tail -c1 "$out_file")" ]; then
-            printf '\n' >>"$out_file"
+        cat "$src" >>"$tmp_out" || {
+            rm -f "$tmp_out" 2>/dev/null
+            return 1
+        }
+        if [ -s "$tmp_out" ] && [ -n "$(tail -c1 "$tmp_out")" ]; then
+            printf '\n' >>"$tmp_out"
         fi
     done < <(collect_default_env_files)
+
+    chmod 600 "$tmp_out" 2>/dev/null || true
+
+    mv -f "$tmp_out" "$out_file" || {
+        rm -f "$tmp_out" 2>/dev/null
+        return 1
+    }
 }
 
 # merge_env_files against the combined defaults (profile + per-service files).
@@ -6252,13 +6269,19 @@ merge_env_files() {
         return
     fi
 
-    # Create a temporary file; clean up on error or interrupt
+    # Create a temporary file next to the target so the final mv is an atomic
+    # same-filesystem rename; clean up on error or interrupt
     local temp_file
-    temp_file=$(mktemp -t harbor.XXXXXX) || {
+    temp_file=$(mktemp "$(dirname "$target_file")/.harbor-merge.XXXXXX") || {
         log_error "Failed to create temporary file for config merge."
         return 1
     }
     trap 'rm -f "$temp_file" 2>/dev/null' RETURN
+
+    # Keys already written to the merged output — a key may appear more than
+    # once across the combined default sources (profile + per-service files)
+    # or in a target left duplicated by an older Harbor; first occurrence wins.
+    local seen_keys=$'\n'
 
     # Variable to track empty lines
     local empty_lines=0
@@ -6291,6 +6314,11 @@ merge_env_files() {
             repeat_count=0
             if [[ "$line" =~ ^[[:alnum:]_]+=.* ]]; then
                 var_name="${line%%=*}"
+                if [[ "$seen_keys" == *$'\n'"$var_name"$'\n'* ]]; then
+                    prev_line="$line"
+                    continue
+                fi
+                seen_keys="${seen_keys}${var_name}"$'\n'
                 if grep -q "^${var_name}=" "$target_file"; then
                     # If the variable exists in target, use that value
                     # Use head -1 to avoid duplicating keys if target has multiple entries
@@ -6311,7 +6339,11 @@ merge_env_files() {
     while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ "$line" =~ ^[[:alnum:]_]+=.* ]]; then
             var_name="${line%%=*}"
+            if [[ "$seen_keys" == *$'\n'"$var_name"$'\n'* ]]; then
+                continue
+            fi
             if ! grep -q "^${var_name}=" "$default_file"; then
+                seen_keys="${seen_keys}${var_name}"$'\n'
                 if ! $added_custom; then
                     echo "" >> "$temp_file"
                     echo "# Custom Variables" >> "$temp_file"

@@ -37,6 +37,9 @@
 - label: s2s > compose.x.s2s.llamacpp.yml sets HARBOR_S2S_MODEL to HARBOR_S2S_LLAMACPP_MODEL (default LiquidAI/LFM2.5-8B-A1B-GGUF:Q8_0 in default.env) so the responses-api warmup against the llamacpp router carries a model name instead of failing 400 'model name is missing'
   command: grep -q 'HARBOR_S2S_MODEL=${HARBOR_S2S_LLAMACPP_MODEL}' services/compose.x.s2s.llamacpp.yml && grep -q 'HARBOR_S2S_LLAMACPP_MODEL=' profiles/default.env
   tags: [services-it, s2s, implemented]
+- label: cli > config > several harbor processes repairing an empty .env at once leave it complete and free of duplicate keys, because the assembled defaults are renamed into place atomically
+  command: d=$(mktemp -d) && mkdir -p "$d/profiles" && cp profiles/default.env "$d/profiles/" && cp -r services "$d/services" && cp harbor.sh "$d/" && : > "$d/.env" && for c in "ls" "ls -a" "defaults" "config get history.file"; do HARBOR_HOME="$d" "$d/harbor.sh" $c >/dev/null 2>&1 & done; wait; keys=$(grep -c "=" "$d/.env"); dupes=$(grep -v "^[[:space:]]*#" "$d/.env" | grep "=" | sed "s/=.*//" | sort | uniq -d); rm -rf "$d"; test "$keys" -ge 50 && test -z "$dupes"
+  tags: [config, svc-defaults, implemented]
 # project
 
 ## domain
