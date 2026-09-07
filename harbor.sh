@@ -1449,6 +1449,7 @@ run_up() {
     local should_attach=false
     local no_defaults=false
     local skip_port_check=false
+    local only_named=false
     local filtered_args=()
     local up_args=()
 
@@ -1469,6 +1470,12 @@ run_up() {
             ;;
         --skip-port-check)
             skip_port_check=true
+            ;;
+        --only-named)
+            # Internal (used by 'harbor restart <service...>'): hand the named
+            # services to compose instead of bringing up everything in the
+            # resolved file set. Not part of the public 'harbor up' contract.
+            only_named=true
             ;;
         *)
             filtered_args+=("$arg")
@@ -1588,8 +1595,21 @@ run_up() {
         fi
     done
 
-    $(compose_with_options "${up_args[@]}" "${filtered_args[@]}") up -d --wait
-    local up_exit=$?
+    local up_exit=0
+    if $only_named; then
+        local up_services=()
+        for service in "${filtered_args[@]}"; do
+            if is_capability "$service"; then
+                continue
+            fi
+            up_services+=("$service")
+        done
+        if [ ${#up_services[@]} -gt 0 ]; then
+            $(compose_with_options "${up_args[@]}" "${filtered_args[@]}") up -d --wait "${up_services[@]}" || up_exit=$?
+        fi
+    else
+        $(compose_with_options "${up_args[@]}" "${filtered_args[@]}") up -d --wait || up_exit=$?
+    fi
 
     if [ $up_exit -ne 0 ]; then
         log_error "Failed to start services."
@@ -1637,14 +1657,19 @@ run_down() {
         echo
         echo "Usage: harbor down [service...] [options]"
         echo
+        echo "With no arguments, stops and removes every running service."
+        echo "With service names, stops and removes only those services and"
+        echo "their '<service>-*' companions - other running services are left"
+        echo "untouched."
+        echo
         echo "Options:"
         echo "  --volumes, -v       Remove named volumes declared in compose files"
-        echo "  --rmi <type>        Remove images (\"local\" or \"all\")"
+        echo "  --rmi <type>        Remove images (\"local\" or \"all\"), bare 'down' only"
         echo "  --timeout, -t <s>   Shutdown timeout in seconds (default: 10)"
         echo
         echo "Examples:"
         echo "  harbor down                 Stop all running services"
-        echo "  harbor down ollama webui    Stop specific services"
+        echo "  harbor down ollama webui    Stop only ollama and webui"
         echo "  harbor down --volumes       Stop all and remove volumes"
         echo "  harbor down --rmi local     Stop all and remove locally-built images"
         echo
@@ -1771,11 +1796,6 @@ run_down() {
         run_dmr_command stop || true
     fi
 
-    local matched_services_str=""
-    if [ ${#matched_services[@]} -gt 0 ]; then
-        matched_services_str=$(printf " %s" "${matched_services[@]}")
-    fi
-
     # Add default timeout unless user specified one
     local has_timeout=false
     local flag
@@ -1787,8 +1807,54 @@ run_down() {
         timeout_args=(--timeout 10)
     fi
 
-    $(compose_with_options "${compose_targets[@]}") down --remove-orphans "${timeout_args[@]}" "${down_flags[@]}" "${requested_services[@]}" $matched_services_str
-    local down_exit=$?
+    local down_exit=0
+
+    if [ ${#requested_services[@]} -eq 0 ]; then
+        $(compose_with_options "${compose_targets[@]}") down --remove-orphans "${timeout_args[@]}" "${down_flags[@]}" || down_exit=$?
+    else
+        # Scoped teardown. 'compose down' always tears down the whole project
+        # and --remove-orphans additionally kills any running service outside
+        # the resolved file set, so naming services here would sweep unrelated
+        # containers. 'stop' + 'rm -f' over the wildcard file set touches only
+        # the named services and their companions.
+        local stop_args=("${timeout_args[@]}")
+        local rm_flags=()
+        local i=0
+        while [ $i -lt ${#down_flags[@]} ]; do
+            flag="${down_flags[$i]}"
+            case "$flag" in
+            -v|--volumes)
+                rm_flags+=("-v")
+                ;;
+            --timeout|-t)
+                stop_args+=("--timeout" "${down_flags[$((i + 1))]:-10}")
+                i=$((i + 1))
+                ;;
+            --timeout=*|-t=*)
+                stop_args+=("--timeout" "${flag#*=}")
+                ;;
+            --rmi)
+                log_warn "'--rmi' only applies to a bare 'harbor down' - ignoring it for ${requested_services[*]}."
+                i=$((i + 1))
+                ;;
+            --rmi=*)
+                log_warn "'--rmi' only applies to a bare 'harbor down' - ignoring it for ${requested_services[*]}."
+                ;;
+            *)
+                log_warn "Ignoring '$flag' - not supported when stopping specific services."
+                ;;
+            esac
+            i=$((i + 1))
+        done
+
+        local down_target_services=("${requested_services[@]}" "${matched_services[@]}")
+        local compose_cmd
+        compose_cmd=$(compose_with_options "*") || return 1
+        $compose_cmd stop "${stop_args[@]}" "${down_target_services[@]}" || down_exit=$?
+        if [ $down_exit -eq 0 ]; then
+            $compose_cmd rm -f "${rm_flags[@]}" "${down_target_services[@]}" || down_exit=$?
+        fi
+    fi
 
     if [ $down_exit -eq 0 ]; then
         log_info "Services stopped."
@@ -1807,8 +1873,9 @@ run_restart() {
         echo "Usage: harbor restart [service...] [options]"
         echo
         echo "With no arguments, restarts all currently running services."
-        echo "With service names, stops those services and starts them along"
-        echo "with any other currently running services."
+        echo "With service names, recreates only those services (and their"
+        echo "'<service>-*' companions) - other running services keep running"
+        echo "and are not recreated."
         echo
         echo "Options:"
         echo "  --open, -o          Open in browser after restart"
@@ -1818,7 +1885,7 @@ run_restart() {
         echo
         echo "Examples:"
         echo "  harbor restart              Restart all running services"
-        echo "  harbor restart ollama       Restart ollama (keeps other services running)"
+        echo "  harbor restart ollama       Restart only ollama, leaving the rest running"
         echo "  harbor restart webui --tail Restart webui and tail logs"
         echo
         echo "See also: harbor down, harbor up"
@@ -1890,12 +1957,33 @@ run_restart() {
         fi
     done
 
+    # Named services restart in place: tear down exactly what was asked for
+    # (plus its companions, which run_down also removes) and bring back only
+    # that set, leaving every other running service alone.
+    local restart_services=()
+    if [ ${#services[@]} -gt 0 ]; then
+        local raw_services companion
+        raw_services=$(docker compose ps -a --format "{{.Service}}")
+        restart_services=("${services[@]}")
+        for svc in "${services[@]}"; do
+            while IFS= read -r companion; do
+                [ -n "$companion" ] || continue
+                restart_services+=("$companion")
+            done <<< "$(echo "$raw_services" | grep "^${svc}-" || true)"
+        done
+    fi
+
     if ! run_down "${services[@]}"; then
         log_error "Failed to stop services. Aborting restart."
         log_error "Check 'docker ps' for stuck containers, then retry."
         return 1
     fi
-    run_up "${unique_services[@]}" "${flags[@]}"
+
+    if [ ${#services[@]} -gt 0 ]; then
+        run_up --only-named "${restart_services[@]}" "${flags[@]}"
+    else
+        run_up "${unique_services[@]}" "${flags[@]}"
+    fi
 }
 
 run_ps() {
